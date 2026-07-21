@@ -98,8 +98,7 @@ clean:
 	$(MAKE) -C wails clean
 
 ci-hint:
-	@echo "Wails builds run on native OS runners. In GitHub Actions use a matrix:"
-	@echo "  strategy.matrix.os: [macos-latest, windows-latest, ubuntu-latest]"
-	@echo "  steps: install the wails CLI, then 'cd wails && make build'."
-	@echo "The CLI needs no matrix — one 'make cli-all' on any runner emits all 5."
-	@echo "Ask and I can scaffold .github/workflows/release.yml."
+	@echo "CI builds all platforms in .github/workflows/release.yml:"
+	@echo "  - CLI: one ubuntu runner cross-compiles all 5 targets (make cli-all)"
+	@echo "  - app: macOS-arm, Windows x64+arm64 (one x64 runner), Linux x64, Linux arm64"
+	@echo "Triggers: workflow_dispatch (on demand), or a v* tag to build + publish a Release."

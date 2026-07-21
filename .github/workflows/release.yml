@@ -1,0 +1,151 @@
+# Builds the CLI for all targets and the desktop app for every supported
+# desktop platform, then (on a version tag) publishes them as a GitHub Release.
+#
+# Why per-OS runners: the Wails app embeds a native webview reached through cgo,
+# so it must build on its target OS — you can't cross-compile the macOS or Linux
+# app from another OS. Two nuances make the matrix smaller than five:
+#   * Windows' webview (WebView2) is loaded at runtime, not linked, so Windows
+#     builds are cgo-free — BOTH Windows arches cross-build on one x64 runner
+#     (verified: `wails build -platform windows/arm64` produces an Aarch64 exe).
+#   * Linux DOES link its webview via cgo, so linux/arm64 needs a native arm64
+#     runner (GitHub now provides one).
+# The CLI is pure Go and cross-compiles all five targets from one runner.
+#
+# No Node/Tailwind step: frontend/src/app.css is committed, so `wails build`
+# needs nothing but the checkout. (That also avoids the Unix Makefile on Windows.)
+
+name: release
+
+on:
+  workflow_dispatch: # build on demand
+  push:
+    tags: ["v*"] # build + publish a Release
+
+permissions:
+  contents: write # required to create the Release
+
+jobs:
+  # Gate: engine + CLI must build, vet, and test before we build anything.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make verify
+
+  # Pure Go — one runner emits all five CLI binaries.
+  cli:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags, so `git describe` gives a real version
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make cli-all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli
+          path: dist/*
+
+  # The desktop app: one native runner per target.
+  app:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            runs-on: macos-latest # Apple Silicon
+            platform: darwin/arm64
+          - name: windows-amd64
+            runs-on: windows-latest
+            platform: windows/amd64
+          - name: windows-arm64
+            runs-on: windows-latest # cgo-free: arm64 cross-builds on x64
+            platform: windows/arm64
+          - name: linux-amd64
+            runs-on: ubuntu-24.04
+            platform: linux/amd64
+            linux: true
+          - name: linux-arm64
+            runs-on: ubuntu-24.04-arm # native Linux arm64 runner
+            platform: linux/arm64
+            linux: true
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash # uniform scripting on all three OSes
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: wails/go.mod
+
+      # Ubuntu 24.04 ships webkit2gtk 4.1 (not 4.0); the app builds with the
+      # matching `webkit2_41` tag below.
+      - name: Install Linux webview deps
+        if: ${{ matrix.linux }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
+
+      - name: Install the Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+
+      - name: Build the app
+        working-directory: wails
+        run: |
+          WAILS="$(go env GOPATH)/bin/wails"
+          TAGS=""
+          [ "${{ matrix.linux }}" = "true" ] && TAGS="-tags webkit2_41"
+          "$WAILS" build -platform ${{ matrix.platform }} $TAGS
+
+      # Package one named asset per target: .app -> zip (preserves the bundle),
+      # Linux binary -> tar.gz (preserves the exec bit), Windows -> raw .exe.
+      - name: Package
+        run: |
+          BIN=wails/build/bin
+          OUT="aigenaudio-${{ matrix.name }}"
+          case "${{ matrix.name }}" in
+            macos-*)   ditto -c -k --sequesterRsrc --keepParent "$BIN/aigenaudio.app" "$OUT.zip"; echo "ASSET=$OUT.zip" >> "$GITHUB_ENV" ;;
+            linux-*)   tar -C "$BIN" -czf "$OUT.tar.gz" aigenaudio;                                 echo "ASSET=$OUT.tar.gz" >> "$GITHUB_ENV" ;;
+            windows-*) cp "$BIN/aigenaudio.exe" "$OUT.exe";                                         echo "ASSET=$OUT.exe" >> "$GITHUB_ENV" ;;
+          esac
+
+      # macOS distribution: the app is self-signed here, so teammates get a
+      # Gatekeeper warning. To ship without it, add an Apple Developer ID cert +
+      # notarization: import the cert as a secret, sign build/bin/aigenaudio.app,
+      # then `xcrun notarytool submit` the zip. Left as a TODO on purpose so
+      # unsigned builds work today.
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ASSET }}
+
+  # On a tag, gather every artifact into one GitHub Release.
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [cli, app]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            $(find artifacts -type f)

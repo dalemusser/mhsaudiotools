@@ -49,6 +49,24 @@ frontend/wailsjs/       GENERATED bindings (wails build/dev writes these)
 frontend/.tools/        the Tailwind binary (gitignored)
 ```
 
+## Cross-platform builds
+
+The app can't be cross-compiled (native webviews via cgo), so releases build on
+per-OS runners in `.github/workflows/release.yml`:
+
+| Target | Runner | How |
+|--------|--------|-----|
+| macOS arm64 | `macos-latest` | native |
+| Windows x64 | `windows-latest` | native |
+| Windows arm64 | `windows-latest` | cross on x64 — Windows is cgo-free |
+| Linux x64 | `ubuntu-24.04` | native (+ webkit2gtk-4.1 deps) |
+| Linux arm64 | `ubuntu-24.04-arm` | native arm64 runner |
+
+Push a `v*` tag to build everything and publish a GitHub Release; or run the
+workflow manually (`workflow_dispatch`). CI calls `wails build` directly (not the
+Makefile) because `frontend/src/app.css` is committed, so no Tailwind/Node step
+is needed and Windows doesn't need `make`.
+
 ## Notes
 
 - **No HTMX, and no localhost server.** We use Wails' default binding model
