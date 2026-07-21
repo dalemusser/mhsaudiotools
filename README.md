@@ -42,3 +42,8 @@ The app is a [Wails](https://wails.io) desktop app; see [wails/README.md](wails/
 for its toolchain. Releases for every platform are built in CI
 (`.github/workflows/release.yml`) — push a `v*` tag to produce them. Architecture
 and design notes are in [DESIGN.md](DESIGN.md).
+
+## License
+
+[MIT License](LICENSE) — Copyright © 2026 Intelligence Builders. Free to use,
+modify, and distribute; keep the copyright notice.

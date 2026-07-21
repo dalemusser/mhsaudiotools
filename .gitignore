@@ -40,3 +40,6 @@ secrets.env
 
 # Build output
 dist/
+
+# Playwright CLI scratch
+.playwright-cli/

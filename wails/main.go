@@ -30,7 +30,7 @@ func main() {
 			TitleBar: mac.TitleBarHiddenInset(),
 			About: &mac.AboutInfo{
 				Title:   "MHS Audio Generator",
-				Message: "Generate game dialog audio with ElevenLabs.",
+				Message: "Generate game dialog audio with ElevenLabs.\n\nCopyright © 2026 Intelligence Builders. MIT License.",
 			},
 		},
 		Bind: []interface{}{

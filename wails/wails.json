@@ -6,6 +6,7 @@
   "info": {
     "productName": "MHS Audio Generator",
     "companyName": "Intelligence Builders",
+    "copyright": "Copyright © 2026 Intelligence Builders. MIT License.",
     "comments": "Generate game dialog audio with ElevenLabs."
   },
   "author": {

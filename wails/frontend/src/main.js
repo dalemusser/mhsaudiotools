@@ -10,7 +10,9 @@ const app = () => window.go.main.App;
 const state = {
   sourcePath: "",
   voicesPath: "",
+  voicesInfo: null, // last loaded/saved voice config, seeds the editor
   outputDir: "",
+  cleanupPath: "", // "" = built-in MHS defaults
   maxParallel: 4,
   running: false,
 };
@@ -55,6 +57,13 @@ const esc = (s) =>
 
 async function init() {
   try {
+    // Cleanup profile needs no key — show the built-in defaults up front.
+    try {
+      renderCleanup(await app().DefaultCleanup());
+    } catch (e) {
+      /* non-fatal */
+    }
+
     const s = await app().GetSettings();
     if (!s.hasKey) {
       $("key-card").classList.remove("hidden");
@@ -130,9 +139,17 @@ async function loadVoices(path) {
   } else {
     info = await app().LoadVoices(path);
   }
-  state.voicesPath = info.path;
-  $("voices-path").textContent = info.path;
-  $("voices-path").title = info.path;
+  renderVoices(info);
+  clearError();
+}
+
+// renderVoices updates the read-only summary and remembers the config so the
+// editor can seed itself.
+function renderVoices(info) {
+  state.voicesPath = info.path || "";
+  state.voicesInfo = info;
+  $("voices-path").textContent = info.path || "No file chosen";
+  $("voices-path").title = info.path || "";
   $("voices-summary").classList.remove("hidden");
 
   list(
@@ -148,7 +165,6 @@ async function loadVoices(path) {
   const box = $("voices-problems");
   box.classList.toggle("hidden", probs.length === 0);
   box.innerHTML = probs.map((p) => `<div>${esc(p)}</div>`).join("");
-  clearError();
 }
 
 $("pick-out").onclick = async () => {
@@ -195,9 +211,54 @@ function request() {
     concurrency: Number($("parallel").value),
     force: $("force").checked,
     cleanup: $("cleanup").checked,
+    cleanupPath: state.cleanupPath,
     defaultSpeaker: $("default-speaker").value.trim(),
   };
 }
+
+// --- cleanup profile --------------------------------------------------------
+
+function renderCleanup(info) {
+  if (!info) return;
+  state.cleanupPath = info.path || ""; // "" for the built-in defaults
+  $("cleanup-name").textContent = info.builtIn ? "built-in MHS defaults" : info.path;
+  $("cleanup-name").title = info.path || "";
+  $("cleanup-count").textContent = `${info.rules} rules (${info.removeCount} remove, ${info.replaceCount} replace)`;
+
+  const probs = info.problems || [];
+  const box = $("cleanup-problems");
+  box.classList.toggle("hidden", probs.length === 0);
+  box.innerHTML = probs.map((p) => `<div>${esc(p)}</div>`).join("");
+}
+
+$("pick-cleanup").onclick = async () => {
+  try {
+    const info = await app().PickCleanupFile();
+    if (info) renderCleanup(info);
+  } catch (e) {
+    showError(e);
+  }
+};
+
+$("use-default-cleanup").onclick = async () => {
+  try {
+    renderCleanup(await app().DefaultCleanup());
+  } catch (e) {
+    showError(e);
+  }
+};
+
+$("save-default-cleanup").onclick = async () => {
+  try {
+    const info = await app().ExportDefaultCleanup(); // writes the file, then selects it
+    if (info) {
+      renderCleanup(info);
+      setStatus(`saved cleanup.json to ${info.path}`);
+    }
+  } catch (e) {
+    showError(e);
+  }
+};
 
 // --- preview ----------------------------------------------------------------
 
@@ -314,6 +375,165 @@ $("reveal").onclick = async () => {
     await app().RevealOutput(state.outputDir);
   } catch (e) {
     showError(e);
+  }
+};
+
+// --- voice editor -----------------------------------------------------------
+//
+// DOM-driven: rows are the source of truth, scraped on save. A scrape→render
+// cycle rebuilds rows whenever the option list changes (add/remove/fetch), so
+// selections and typed names survive.
+
+const ve = {
+  voiceList: [], // [{id, name}] fetched from the account
+  voiceNames: {}, // id -> name, seeded from the config + fetched voices
+};
+
+// veVoiceOptions builds <option>s, always including the row's current voice even
+// if it isn't in the fetched list (so nothing is silently lost).
+function veVoiceOptions(selectedId) {
+  let html = `<option value="">— choose voice —</option>`;
+  const seen = new Set();
+  for (const v of ve.voiceList) {
+    seen.add(v.id);
+    html += `<option value="${esc(v.id)}"${v.id === selectedId ? " selected" : ""}>${esc(v.name)}</option>`;
+  }
+  if (selectedId && !seen.has(selectedId)) {
+    const nm = ve.voiceNames[selectedId] || selectedId;
+    html += `<option value="${esc(selectedId)}" selected>${esc(nm)} (current)</option>`;
+  }
+  return html;
+}
+
+function veCharRow(character, voiceId) {
+  return `<div class="ve-row flex items-center gap-2">
+      <input class="ve-name input-sm flex-1" placeholder="Character" value="${esc(character || "")}"/>
+      <select class="ve-voice input-sm flex-1">${veVoiceOptions(voiceId || "")}</select>
+      <button class="ve-del btn" title="Remove">✕</button>
+    </div>`;
+}
+
+function veSlotRow(n, voiceId) {
+  return `<div class="ve-row flex items-center gap-2">
+      <span class="ve-slot-label w-16 text-xs text-slate-400">Player${n}</span>
+      <select class="ve-voice input-sm flex-1">${veVoiceOptions(voiceId || "")}</select>
+      <button class="ve-del btn" title="Remove">✕</button>
+    </div>`;
+}
+
+// scrape reads the current editor state from the DOM.
+function veScrape() {
+  const chars = [...$("ve-chars").querySelectorAll(".ve-row")].map((row) => ({
+    character: row.querySelector(".ve-name").value.trim(),
+    voiceId: row.querySelector(".ve-voice").value,
+  }));
+  const slots = [...$("ve-slots").querySelectorAll(".ve-row")].map((row) => ({
+    voiceId: row.querySelector(".ve-voice").value,
+  }));
+  return { chars, slots };
+}
+
+function veRender(data) {
+  $("ve-chars").innerHTML = data.chars.map((c) => veCharRow(c.character, c.voiceId)).join("");
+  $("ve-slots").innerHTML = data.slots.map((s, i) => veSlotRow(i + 1, s.voiceId)).join("");
+}
+
+function veRenumberSlots() {
+  [...$("ve-slots").querySelectorAll(".ve-slot-label")].forEach((el, i) => {
+    el.textContent = "Player" + (i + 1);
+  });
+}
+
+function openVoiceEditor() {
+  const info = state.voicesInfo || { assignments: [], playerSlots: [] };
+  ve.voiceNames = {};
+  const chars = (info.assignments || []).map((a) => {
+    if (a.voiceId) ve.voiceNames[a.voiceId] = a.voiceName;
+    return { character: a.character, voiceId: a.voiceId };
+  });
+  const slots = (info.playerSlots || []).map((s) => {
+    if (s.voiceId) ve.voiceNames[s.voiceId] = s.voiceName;
+    return { voiceId: s.voiceId };
+  });
+  veRender({ chars, slots });
+  veError("");
+  $("ve-status").textContent = "";
+  $("voice-modal").classList.remove("hidden");
+}
+
+function closeVoiceEditor() {
+  $("voice-modal").classList.add("hidden");
+}
+
+function veError(msg) {
+  const el = $("ve-error");
+  el.textContent = msg || "";
+  el.classList.toggle("hidden", !msg);
+}
+
+$("edit-voices").onclick = openVoiceEditor;
+$("ve-cancel").onclick = closeVoiceEditor;
+
+$("ve-add-char").onclick = () => {
+  const d = veScrape();
+  d.chars.push({ character: "", voiceId: "" });
+  veRender(d);
+};
+$("ve-add-slot").onclick = () => {
+  const d = veScrape();
+  d.slots.push({ voiceId: "" });
+  veRender(d);
+};
+
+// Delegated remove: rebuild from the scrape minus the clicked row (keeps slot
+// numbering correct).
+function veDelHandler(container, isSlots) {
+  container.addEventListener("click", (e) => {
+    const btn = e.target.closest(".ve-del");
+    if (!btn) return;
+    const rows = [...container.querySelectorAll(".ve-row")];
+    const idx = rows.indexOf(btn.closest(".ve-row"));
+    const d = veScrape();
+    (isSlots ? d.slots : d.chars).splice(idx, 1);
+    veRender(d);
+  });
+}
+veDelHandler($("ve-chars"), false);
+veDelHandler($("ve-slots"), true);
+
+$("ve-fetch").onclick = async () => {
+  $("ve-status").textContent = "fetching…";
+  try {
+    const voices = await app().FetchVoices();
+    ve.voiceList = (voices || []).map((v) => ({ id: v.ID ?? v.id, name: v.Name ?? v.name }));
+    for (const v of ve.voiceList) ve.voiceNames[v.id] = v.name;
+    veRender(veScrape()); // rebuild dropdowns, preserving current selections
+    $("ve-status").textContent = `${ve.voiceList.length} voices loaded`;
+  } catch (e) {
+    $("ve-status").textContent = "";
+    veError(String(e?.message || e));
+  }
+};
+
+$("ve-save").onclick = async () => {
+  const d = veScrape();
+  const assignments = d.chars
+    .filter((c) => c.character && c.voiceId)
+    .map((c) => ({ character: c.character, voiceId: c.voiceId, voiceName: ve.voiceNames[c.voiceId] || c.voiceId }));
+  // Player slots keep DOM order; numbering is positional (Player1, Player2, …).
+  const slots = d.slots
+    .filter((s) => s.voiceId)
+    .map((s, i) => ({ index: i + 1, voiceId: s.voiceId, voiceName: ve.voiceNames[s.voiceId] || s.voiceId }));
+
+  const dropped = d.chars.length - assignments.length + (d.slots.length - slots.length);
+  try {
+    const info = await app().SaveVoices(state.voicesPath, assignments, slots);
+    if (!info) return; // save dialog canceled
+    renderVoices(info);
+    closeVoiceEditor();
+    setStatus(dropped ? `voices saved (${dropped} incomplete row(s) skipped)` : "voices saved");
+  } catch (e) {
+    veError(String(e?.message || e));
   }
 };
 

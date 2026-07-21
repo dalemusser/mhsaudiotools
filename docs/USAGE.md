@@ -63,10 +63,13 @@ mhsaudio <command> [flags]
   account         show the account tier and its max parallelism
   voices          list the voices available on the account
   import-voices   convert/merge a VoiceAssignments.csv into a voices.json
+  scan            find markup the cleanup rules miss; suggest remove rules
   generate        generate audio (use -dry-run to preview)
+  version         show the version
 ```
 
 The API key comes from `$ELEVENLABS_API_KEY`, `-key-file <path>`, or `~/.elevenlabs_key`.
+(`scan` and `version` need no key.)
 
 ### Set up voices once
 
@@ -76,6 +79,29 @@ mhsaudio import-voices -csv VoiceAssignments.csv -out voices.json
 
 # Browse available voices to fill in / correct assignments
 mhsaudio voices -filter toppo
+```
+
+### Maintaining the cleanup rules
+
+Cleanup (removing stage directions/markup, fixing pronunciations) uses a profile.
+By default it's the built-in `mhs-dialogue` rules; keep **one shared `cleanup.json`**
+the team edits over time. Create it from the defaults (in the app: *Save MHS
+defaults…*), then edit it as new markup or pronunciation issues turn up.
+
+Find what the current rules miss — `scan` applies the profile and reports the
+leftover markup, so it only surfaces genuinely new tokens:
+
+```bash
+mhsaudio scan -in 2026-06-10-MHSDialogueExport.csv                 # against built-in rules
+mhsaudio scan -in export.csv -profile cleanup.json                 # against your shared file
+```
+
+Each suggestion comes with a ready-to-paste remove regex and example matches.
+Add the real markup to `cleanup.json`; leave anything that's actual speech
+(parentheticals especially). Then pass your file to `generate`:
+
+```bash
+mhsaudio generate -in export.csv -voices voices.json -out ./audio -profile cleanup.json
 ```
 
 ### Preview, then generate

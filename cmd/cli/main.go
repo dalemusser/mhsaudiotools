@@ -8,6 +8,10 @@ import (
 	"os"
 )
 
+// version is set at build time via -ldflags "-X main.version=...", stamped from
+// the git tag (see Makefile). It stays "dev" for un-stamped local builds.
+var version = "dev"
+
 const usage = `mhsaudio — generate game dialog audio with ElevenLabs
 
 Usage:
@@ -15,9 +19,11 @@ Usage:
 
 Commands:
   generate        Generate audio for a dialog source (use -dry-run to preview)
+  scan            Find markup the cleanup profile misses; suggest remove rules
   voices          List the voices available on the account
   account         Show the account tier and its max concurrency
   import-voices   Convert/merge a VoiceAssignments.csv into a voices.json config
+  version         Show the version
 
 Run "mhsaudio <command> -h" for a command's flags.
 
@@ -34,12 +40,17 @@ func main() {
 	switch os.Args[1] {
 	case "generate":
 		err = runGenerate(os.Args[2:])
+	case "scan":
+		err = runScan(os.Args[2:])
 	case "voices":
 		err = runVoices(os.Args[2:])
 	case "account":
 		err = runAccount(os.Args[2:])
 	case "import-voices":
 		err = runImportVoices(os.Args[2:])
+	case "version", "--version":
+		fmt.Printf("mhsaudio %s\nCopyright © 2026 Intelligence Builders. MIT License.\n", version)
+		return
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return

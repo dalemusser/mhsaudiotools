@@ -6,6 +6,14 @@ export function Cancel() {
   return window['go']['main']['App']['Cancel']();
 }
 
+export function DefaultCleanup() {
+  return window['go']['main']['App']['DefaultCleanup']();
+}
+
+export function ExportDefaultCleanup() {
+  return window['go']['main']['App']['ExportDefaultCleanup']();
+}
+
 export function FetchVoices() {
   return window['go']['main']['App']['FetchVoices']();
 }
@@ -30,6 +38,10 @@ export function LoadVoices(arg1) {
   return window['go']['main']['App']['LoadVoices'](arg1);
 }
 
+export function PickCleanupFile() {
+  return window['go']['main']['App']['PickCleanupFile']();
+}
+
 export function PickOutputDir() {
   return window['go']['main']['App']['PickOutputDir']();
 }
@@ -52,4 +64,8 @@ export function RevealOutput(arg1) {
 
 export function SaveKey(arg1) {
   return window['go']['main']['App']['SaveKey'](arg1);
+}
+
+export function SaveVoices(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveVoices'](arg1, arg2, arg3);
 }

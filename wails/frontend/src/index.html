@@ -55,6 +55,7 @@
     </div>
     <div class="flex items-center gap-3">
       <button id="pick-voices" class="btn">Choose voices.json or CSV…</button>
+      <button id="edit-voices" class="btn">Edit…</button>
       <span id="voices-path" class="path">No file chosen</span>
     </div>
     <div id="voices-summary" class="hidden mt-4">
@@ -119,6 +120,24 @@
       <label class="check"><input id="timestamps" type="checkbox"/> Word timings</label>
       <label class="check"><input id="force" type="checkbox"/> Regenerate everything</label>
     </div>
+
+    <!-- Cleanup profile: which remove/replace rules to apply -->
+    <div id="cleanup-block" class="mt-3">
+      <div class="flex flex-wrap items-center gap-2 text-xs">
+        <span class="label">Cleanup rules</span>
+        <span id="cleanup-name" class="text-slate-300">built-in MHS defaults</span>
+        <span id="cleanup-count" class="text-slate-500"></span>
+        <button id="pick-cleanup" class="btn">Choose cleanup.json…</button>
+        <button id="use-default-cleanup" class="btn">Use MHS defaults</button>
+        <button id="save-default-cleanup" class="btn">Save MHS defaults…</button>
+      </div>
+      <p class="mt-1 text-[11px] leading-snug text-slate-500">
+        The remove/replace rules. Keep one shared <code>cleanup.json</code> the team
+        edits over time; “Save MHS defaults…” creates it to start from. Run
+        <code>mhsaudio scan</code> to find markup the rules don’t yet cover.
+      </p>
+      <div id="cleanup-problems" class="hidden mt-2 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200"></div>
+    </div>
   </section>
 
   <!-- Actions -->
@@ -170,6 +189,44 @@
   </section>
 
 </main>
+
+<!-- Voice editor modal -->
+<div id="voice-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+  <div class="w-full max-w-3xl max-h-[85vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-5">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="card-title">Edit voices</h2>
+      <button id="ve-fetch" class="btn">Fetch voices from account</button>
+    </div>
+    <p id="ve-fetch-note" class="text-[11px] text-slate-500 mb-4">
+      Fetch to pick voices by name from a dropdown; until then, each row keeps its current voice.
+    </p>
+
+    <div class="flex items-center justify-between">
+      <h3 class="subhead">Characters</h3>
+      <button id="ve-add-char" class="btn">+ Add character</button>
+    </div>
+    <div id="ve-chars" class="mt-2 space-y-2"></div>
+
+    <div class="mt-5 flex items-center justify-between">
+      <h3 class="subhead">Player voice slots</h3>
+      <button id="ve-add-slot" class="btn">+ Add slot</button>
+    </div>
+    <p class="mt-1 text-[11px] leading-snug text-slate-500">
+      Each row is <code>Player1</code>, <code>Player2</code>, … in order. Removing a
+      row renumbers the ones below it, which changes which voice a player slot uses —
+      so edit these deliberately.
+    </p>
+    <div id="ve-slots" class="mt-2 space-y-2"></div>
+
+    <div id="ve-error" class="hidden mt-4 rounded border border-red-800 bg-red-950/40 p-2 text-xs text-red-200"></div>
+
+    <div class="mt-5 flex items-center gap-3">
+      <button id="ve-save" class="btn-primary">Save</button>
+      <button id="ve-cancel" class="btn">Cancel</button>
+      <span id="ve-status" class="text-xs text-slate-500"></span>
+    </div>
+  </div>
+</div>
 
 <script src="/main.js"></script>
 </body>

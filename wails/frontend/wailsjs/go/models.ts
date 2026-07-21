@@ -20,6 +20,30 @@ export namespace main {
 	        this.characterLimit = source["characterLimit"];
 	    }
 	}
+	export class CleanupInfo {
+	    path: string;
+	    name: string;
+	    rules: number;
+	    removeCount: number;
+	    replaceCount: number;
+	    problems: string[];
+	    builtIn: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CleanupInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.rules = source["rules"];
+	        this.removeCount = source["removeCount"];
+	        this.replaceCount = source["replaceCount"];
+	        this.problems = source["problems"];
+	        this.builtIn = source["builtIn"];
+	    }
+	}
 	export class SampleItem {
 	    relPath: string;
 	    voice: string;
@@ -109,6 +133,7 @@ export namespace main {
 	    concurrency: number;
 	    force: boolean;
 	    cleanup: boolean;
+	    cleanupPath: string;
 	    defaultSpeaker: string;
 	
 	    static createFrom(source: any = {}) {
@@ -127,6 +152,7 @@ export namespace main {
 	        this.concurrency = source["concurrency"];
 	        this.force = source["force"];
 	        this.cleanup = source["cleanup"];
+	        this.cleanupPath = source["cleanupPath"];
 	        this.defaultSpeaker = source["defaultSpeaker"];
 	    }
 	}

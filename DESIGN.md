@@ -147,6 +147,16 @@ shareable **cleanup profiles**.
 - Shareable across the team so everyone generates consistent audio. Saved as JSON
   with readable names (`"kind": "regex"`, `"op": "remove"`) and a `note` per rule;
   regexes are compiled at load so a typo fails fast, not 3,000 lines into a run.
+- **One shared `cleanup.json`** the team maintains over time (not baked into code):
+  the built-in `MHSProfile()` is a *seed* the app can write to a file to start
+  from. The CLI takes `-profile`; the app loads a custom file (with a "Save MHS
+  defaults…" action to create the shared one).
+- **`text.Suggest()` + `mhsaudio scan`** find what the rules miss: they apply the
+  profile, then scan the *residue* for markup/stage-direction families (`[…]`,
+  `{{…}}`, `<…>`, `(…)`, escapes) the profile doesn't remove — surfacing only
+  genuinely new tokens, each with a ready-to-add remove regex, counts, and
+  examples. (Scanning the real export immediately turned up unhandled `[TITLE]`,
+  `<color=orange>`, `(sighs)`, etc. that the ported profile missed.)
 
 `text.MHSProfile()` is the port of `UpdateText.py`, with two deliberate deviations:
 

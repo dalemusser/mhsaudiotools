@@ -26,6 +26,8 @@ BIN     := mhsaudio
 DIST    := dist
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w
+# Stamp the version into the CLI binary (main.version) — surfaced by `mhsaudio version`.
+CLI_LDFLAGS := $(LDFLAGS) -X main.version=$(VERSION)
 
 # Requested targets. "x86" here means 64-bit Intel/AMD (amd64), the standard
 # desktop target; add darwin/amd64 or windows/386 to this list if ever needed.
@@ -68,8 +70,8 @@ check-cross:
 
 cli:
 	@mkdir -p $(DIST)
-	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/$(BIN) ./cmd/cli
-	@echo "built $(DIST)/$(BIN)"
+	CGO_ENABLED=0 go build -trimpath -ldflags '$(CLI_LDFLAGS)' -o $(DIST)/$(BIN) ./cmd/cli
+	@echo "built $(DIST)/$(BIN) ($(VERSION))"
 
 # Pure Go, so this genuinely produces all 5 binaries from any host.
 cli-all:
@@ -81,7 +83,7 @@ cli-all:
 		[ "$$os" = "windows" ] && out=$$out.exe; \
 		printf "  building %-14s -> %s\n" "$$os/$$arch" "$$out"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
-			go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/cli || exit 1; \
+			go build -trimpath -ldflags '$(CLI_LDFLAGS)' -o $$out ./cmd/cli || exit 1; \
 	done
 	@echo "CLI binaries in $(DIST)/ (version $(VERSION))"
 

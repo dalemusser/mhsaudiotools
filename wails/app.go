@@ -182,6 +182,35 @@ func (a *App) ImportVoicesCSV(csvPath, outPath string) (*VoicesInfo, error) {
 	}, nil
 }
 
+// SaveVoices validates and writes an edited voice config, preserving any existing
+// default voice (which is set outside this editor). A blank path opens a save
+// dialog for a brand-new file. Returns the saved config's summary.
+func (a *App) SaveVoices(path string, assignments []voice.Assignment, slots []voice.Slot) (*VoicesInfo, error) {
+	if path == "" {
+		p, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+			Title:           "Save voices.json",
+			DefaultFilename: "voices.json",
+		})
+		if err != nil || p == "" {
+			return nil, err
+		}
+		path = p
+	}
+	cfg := &voice.Config{Assignments: assignments, PlayerSlots: slots}
+	if existing, err := voice.LoadConfig(path); err == nil {
+		cfg.Default = existing.Default // don't drop a default set elsewhere
+	}
+	if err := cfg.Save(path); err != nil {
+		return nil, err
+	}
+	return &VoicesInfo{
+		Path:        path,
+		Assignments: cfg.Assignments,
+		PlayerSlots: cfg.SortedSlots(),
+		Problems:    cfg.Validate(),
+	}, nil
+}
+
 // FetchVoices lists the account's voices so the UI can offer a picker instead of
 // asking anyone to paste a voice ID.
 func (a *App) FetchVoices() ([]synth.Voice, error) {
@@ -195,6 +224,72 @@ func (a *App) FetchVoices() ([]synth.Voice, error) {
 	}
 	sort.Slice(voices, func(i, j int) bool { return voices[i].Name < voices[j].Name })
 	return voices, nil
+}
+
+// --- cleanup profile --------------------------------------------------------
+
+// CleanupInfo summarizes a cleanup profile for display.
+type CleanupInfo struct {
+	Path         string   `json:"path"` // empty for the built-in defaults
+	Name         string   `json:"name"`
+	Rules        int      `json:"rules"`
+	RemoveCount  int      `json:"removeCount"`
+	ReplaceCount int      `json:"replaceCount"`
+	Problems     []string `json:"problems"`
+	BuiltIn      bool     `json:"builtIn"`
+}
+
+func cleanupInfo(path string, p *text.Profile, builtIn bool) *CleanupInfo {
+	info := &CleanupInfo{Path: path, Name: p.Name, Rules: len(p.Rules), BuiltIn: builtIn}
+	for _, r := range p.Rules {
+		if r.Op == text.OpRemove {
+			info.RemoveCount++
+		} else {
+			info.ReplaceCount++
+		}
+	}
+	if err := p.Validate(); err != nil {
+		info.Problems = append(info.Problems, err.Error())
+	}
+	return info
+}
+
+// DefaultCleanup summarizes the built-in MHS cleanup profile.
+func (a *App) DefaultCleanup() *CleanupInfo {
+	return cleanupInfo("", text.MHSProfile(), true)
+}
+
+// PickCleanupFile opens a dialog for a cleanup.json and returns its summary.
+func (a *App) PickCleanupFile() (*CleanupInfo, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:   "Choose a cleanup.json",
+		Filters: []runtime.FileFilter{{DisplayName: "Cleanup profile (*.json)", Pattern: "*.json"}},
+	})
+	if err != nil || path == "" {
+		return nil, err
+	}
+	p, err := text.LoadProfile(path)
+	if err != nil {
+		return nil, err
+	}
+	return cleanupInfo(path, p, false), nil
+}
+
+// ExportDefaultCleanup writes the built-in MHS rules to a file the team can edit
+// and share (the one shared cleanup.json), then selects it. Returns its summary.
+func (a *App) ExportDefaultCleanup() (*CleanupInfo, error) {
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save cleanup.json (MHS defaults, to edit and share)",
+		DefaultFilename: "cleanup.json",
+	})
+	if err != nil || path == "" {
+		return nil, err
+	}
+	p := text.MHSProfile()
+	if err := p.Save(path); err != nil {
+		return nil, err
+	}
+	return cleanupInfo(path, p, false), nil
 }
 
 // --- generate ---------------------------------------------------------------
@@ -211,6 +306,7 @@ type Request struct {
 	Concurrency    int    `json:"concurrency"` // 0 = auto (the account's max)
 	Force          bool   `json:"force"`
 	Cleanup        bool   `json:"cleanup"`
+	CleanupPath    string `json:"cleanupPath"` // custom cleanup.json; empty = built-in MHS defaults
 	DefaultSpeaker string `json:"defaultSpeaker"`
 }
 
@@ -432,7 +528,15 @@ func (a *App) build(req Request) (*job.Runner, []source.LineItem, string, error)
 
 	var profile *text.Profile
 	if req.Cleanup {
-		profile = text.MHSProfile()
+		if req.CleanupPath != "" {
+			p, err := text.LoadProfile(req.CleanupPath)
+			if err != nil {
+				return nil, nil, "", fmt.Errorf("cleanup profile: %w", err)
+			}
+			profile = p
+		} else {
+			profile = text.MHSProfile()
+		}
 	}
 	layout, err := pickLayout(req.Layout)
 	if err != nil {
