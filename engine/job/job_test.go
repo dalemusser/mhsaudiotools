@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dalemusser/aigenaudiotools/engine/output"
-	"github.com/dalemusser/aigenaudiotools/engine/source"
-	"github.com/dalemusser/aigenaudiotools/engine/synth"
-	"github.com/dalemusser/aigenaudiotools/engine/text"
-	"github.com/dalemusser/aigenaudiotools/engine/voice"
+	"github.com/dalemusser/mhsaudiotools/engine/output"
+	"github.com/dalemusser/mhsaudiotools/engine/source"
+	"github.com/dalemusser/mhsaudiotools/engine/synth"
+	"github.com/dalemusser/mhsaudiotools/engine/text"
+	"github.com/dalemusser/mhsaudiotools/engine/voice"
 )
 
 // fakeClient records requests, can fail selected voices, and tracks peak concurrency.

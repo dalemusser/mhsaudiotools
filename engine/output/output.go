@@ -6,8 +6,8 @@ package output
 import (
 	"fmt"
 
-	"github.com/dalemusser/aigenaudiotools/engine/source"
-	"github.com/dalemusser/aigenaudiotools/engine/voice"
+	"github.com/dalemusser/mhsaudiotools/engine/source"
+	"github.com/dalemusser/mhsaudiotools/engine/voice"
 )
 
 // Target is one audio file to produce: where it goes under the output root and

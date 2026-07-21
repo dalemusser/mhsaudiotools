@@ -1,4 +1,4 @@
-# Root build orchestrator for aigenaudiotools.
+# Root build orchestrator for mhsaudiotools.
 #
 # Two modules live here (see DESIGN.md): the engine + CLI (this module, zero
 # third-party deps) and the desktop app (wails/, its own module). This Makefile
@@ -33,10 +33,12 @@ CLI_PLATFORMS := darwin/arm64 windows/amd64 windows/arm64 linux/amd64 linux/arm6
 
 .DEFAULT_GOAL := help
 
-.PHONY: help verify check-cross cli cli-all app dist clean ci-hint
+CDN := $(DIST)/cdn
+
+.PHONY: help verify check-cross cli cli-all app app-macos app-windows cdn dist clean ci-hint
 
 help:
-	@echo "aigenaudiotools — build targets:"
+	@echo "mhsaudiotools — build targets:"
 	@echo "  make verify        build + vet + test the engine and CLI"
 	@echo "  make check-cross   compile-check all packages for every target OS/arch"
 	@echo "  make cli           build the CLI for this host -> $(DIST)/"
@@ -74,7 +76,8 @@ cli-all:
 	@mkdir -p $(DIST)
 	@for p in $(CLI_PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; \
-		out=$(DIST)/$(BIN)_$${os}_$${arch}; \
+		label=$$os; [ "$$os" = "darwin" ] && label=macos; \
+		out=$(DIST)/$(BIN)-cli-$${label}-$${arch}; \
 		[ "$$os" = "windows" ] && out=$$out.exe; \
 		printf "  building %-14s -> %s\n" "$$os/$$arch" "$$out"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
@@ -88,6 +91,40 @@ cli-all:
 # wails/Makefile, which also compiles Tailwind before building.
 app:
 	$(MAKE) -C wails build
+
+# Packaged, distributable app bundles (named as they appear on the download
+# page). These call `wails build` directly — app.css is committed, so no Tailwind
+# step is needed. Requires the Wails CLI on PATH.
+
+# macOS host only: build, rename the bundle to "MHS Audio Generator.app", zip it.
+app-macos:
+	@mkdir -p $(DIST)
+	cd wails && wails build -platform darwin/arm64
+	@rm -rf "wails/build/bin/MHS Audio Generator.app"
+	mv "wails/build/bin/aigenaudio.app" "wails/build/bin/MHS Audio Generator.app"
+	cd wails/build/bin && ditto -c -k --sequesterRsrc --keepParent \
+		"MHS Audio Generator.app" "$(CURDIR)/$(DIST)/aigenaudio-app-macos-arm64.zip"
+	@echo "built $(DIST)/aigenaudio-app-macos-arm64.zip"
+
+# Any host (Windows is cgo-free): both Windows arches.
+app-windows:
+	@mkdir -p $(DIST)
+	cd wails && wails build -platform windows/amd64 && cp build/bin/aigenaudio.exe "$(CURDIR)/$(DIST)/aigenaudio-app-windows-amd64.exe"
+	cd wails && wails build -platform windows/arm64 && cp build/bin/aigenaudio.exe "$(CURDIR)/$(DIST)/aigenaudio-app-windows-arm64.exe"
+	@echo "built Windows app exes in $(DIST)/"
+
+# Stage the download page + all built binaries for upload to the CDN.
+# Linux app builds only come from CI (see ci-hint) — drop their .tar.gz files
+# into $(DIST)/ before running this if you want them included.
+cdn:
+	@mkdir -p $(CDN)
+	cp web/index.html $(CDN)/
+	@cp $(DIST)/aigenaudio-app-* $(DIST)/aigenaudio-cli-* $(CDN)/ 2>/dev/null || true
+	@echo "staged for upload in $(CDN)/:"
+	@ls -1 $(CDN)
+	@echo ""
+	@echo "Upload (adjust bucket/profile for cdn.intelligencebuilders.com):"
+	@echo "  aws s3 sync $(CDN)/ s3://<bucket>/projects/mhs/audiotools/ --delete"
 
 # --- aggregate / housekeeping -----------------------------------------------
 

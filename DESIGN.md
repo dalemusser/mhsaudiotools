@@ -1,4 +1,4 @@
-# aigenaudiotools — Design
+# mhsaudiotools — Design
 
 Native desktop + CLI tools for generating game dialog audio with ElevenLabs,
 built to replace the ad‑hoc Python scripts in `prior-apps/` and to be handed to
@@ -63,8 +63,8 @@ written once against `LineItem` and never needs to know the input format.
 ### Repo layout
 
 ```
-aigenaudiotools/
-  go.mod                     module 1: github.com/dalemusser/aigenaudiotools (engine + CLI)
+mhsaudiotools/
+  go.mod                     module 1: github.com/dalemusser/mhsaudiotools (engine + CLI)
   DESIGN.md                  this document
   engine/                    the brain — no Wails, no terminal
     source/                  input adapters → []LineItem (dbexport, simplescript, …), registry + auto-detect

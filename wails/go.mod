@@ -2,17 +2,17 @@
 // Go 1.25 and pulls in ~30 dependencies, while engine/ and cmd/cli deliberately
 // have none. Keeping them apart means the engine stays dependency-free and
 // portable; only the GUI shell carries the GUI's baggage.
-module github.com/dalemusser/aigenaudiotools/wails
+module github.com/dalemusser/mhsaudiotools/wails
 
 go 1.25.0
 
 require (
-	github.com/dalemusser/aigenaudiotools v0.0.0
+	github.com/dalemusser/mhsaudiotools v0.0.0
 	github.com/wailsapp/wails/v2 v2.13.0
 )
 
 // The engine lives alongside this module in the same repo and is not published.
-replace github.com/dalemusser/aigenaudiotools => ../
+replace github.com/dalemusser/mhsaudiotools => ../
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect

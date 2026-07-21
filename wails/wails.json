@@ -3,6 +3,11 @@
   "name": "aigenaudio",
   "outputfilename": "aigenaudio",
   "wailsjsdir": "./frontend",
+  "info": {
+    "productName": "MHS Audio Generator",
+    "companyName": "Intelligence Builders",
+    "comments": "Generate game dialog audio with ElevenLabs."
+  },
   "author": {
     "name": "Dale Musser",
     "email": "dale@dalemusser.com"

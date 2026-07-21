@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dalemusser/aigenaudiotools/engine/synth"
-	"github.com/dalemusser/aigenaudiotools/engine/voice"
+	"github.com/dalemusser/mhsaudiotools/engine/synth"
+	"github.com/dalemusser/mhsaudiotools/engine/voice"
 )
 
 func runVoices(args []string) error {

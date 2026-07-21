@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dalemusser/aigenaudiotools/engine/keys"
-	"github.com/dalemusser/aigenaudiotools/engine/source"
-	"github.com/dalemusser/aigenaudiotools/engine/text"
-	"github.com/dalemusser/aigenaudiotools/engine/voice"
+	"github.com/dalemusser/mhsaudiotools/engine/keys"
+	"github.com/dalemusser/mhsaudiotools/engine/source"
+	"github.com/dalemusser/mhsaudiotools/engine/text"
+	"github.com/dalemusser/mhsaudiotools/engine/voice"
 )
 
 // resolveAPIKey defers to the engine so the CLI and the desktop app resolve keys

@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dalemusser/aigenaudiotools/engine/job"
-	"github.com/dalemusser/aigenaudiotools/engine/output"
-	"github.com/dalemusser/aigenaudiotools/engine/source"
-	"github.com/dalemusser/aigenaudiotools/engine/synth"
-	"github.com/dalemusser/aigenaudiotools/engine/voice"
+	"github.com/dalemusser/mhsaudiotools/engine/job"
+	"github.com/dalemusser/mhsaudiotools/engine/output"
+	"github.com/dalemusser/mhsaudiotools/engine/source"
+	"github.com/dalemusser/mhsaudiotools/engine/synth"
+	"github.com/dalemusser/mhsaudiotools/engine/voice"
 )
 
 func runGenerate(args []string) error {

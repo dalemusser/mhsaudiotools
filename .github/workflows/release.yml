@@ -113,9 +113,11 @@ jobs:
       - name: Package
         run: |
           BIN=wails/build/bin
-          OUT="aigenaudio-${{ matrix.name }}"
+          OUT="aigenaudio-app-${{ matrix.name }}"
           case "${{ matrix.name }}" in
-            macos-*)   ditto -c -k --sequesterRsrc --keepParent "$BIN/aigenaudio.app" "$OUT.zip"; echo "ASSET=$OUT.zip" >> "$GITHUB_ENV" ;;
+            macos-*)   mv "$BIN/aigenaudio.app" "$BIN/MHS Audio Generator.app";
+                       ditto -c -k --sequesterRsrc --keepParent "$BIN/MHS Audio Generator.app" "$OUT.zip";
+                       echo "ASSET=$OUT.zip" >> "$GITHUB_ENV" ;;
             linux-*)   tar -C "$BIN" -czf "$OUT.tar.gz" aigenaudio;                                 echo "ASSET=$OUT.tar.gz" >> "$GITHUB_ENV" ;;
             windows-*) cp "$BIN/aigenaudio.exe" "$OUT.exe";                                         echo "ASSET=$OUT.exe" >> "$GITHUB_ENV" ;;
           esac

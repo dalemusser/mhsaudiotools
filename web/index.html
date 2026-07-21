@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MHS Audio Generator — Downloads</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --ink: #1a2233; --muted: #667085;
+    --line: #e4e7ec; --brand: #0284c7; --brand-ink: #ffffff; --accent: #ecf7fd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f172a; --card: #172033; --ink: #e6ebf2; --muted: #93a1b5;
+      --line: #263248; --brand: #38bdf8; --brand-ink: #05203a; --accent: #12263c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 40px 20px 80px; }
+  header { margin-bottom: 8px; }
+  h1 { font-size: 2rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .tagline { color: var(--muted); font-size: 1.05rem; margin: 0 0 4px; }
+  h2 { font-size: 1.25rem; margin: 40px 0 4px; letter-spacing: -0.01em; }
+  h3 { font-size: 1rem; margin: 22px 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  a { color: var(--brand); }
+  code {
+    background: var(--accent); padding: 1px 6px; border-radius: 5px;
+    font: 0.85em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  pre {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; overflow-x: auto;
+    font: 0.85rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .card .os { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .card .os .emoji { font-size: 1.2rem; }
+  .card .arch { color: var(--muted); font-size: 0.85rem; margin-top: -6px; }
+  .dl {
+    margin-top: auto; display: inline-block; text-align: center;
+    background: var(--brand); color: var(--brand-ink); text-decoration: none;
+    font-weight: 600; font-size: 0.9rem; padding: 9px 12px; border-radius: 8px;
+  }
+  .dl:hover { filter: brightness(1.07); }
+  .dl small { display: block; font-weight: 400; opacity: 0.85; font-size: 0.75rem; }
+  .note {
+    background: var(--accent); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; margin: 18px 0; font-size: 0.92rem;
+  }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  .steps { padding-left: 20px; }
+  .steps li { margin: 6px 0; }
+  footer { margin-top: 56px; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); padding-top: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>MHS Audio Generator</h1>
+    <p class="tagline">Generate spoken dialog audio for the game with ElevenLabs.</p>
+  </header>
+
+  <p>Point it at your dialog — a Dialogue System export or a writer's script — pick
+  the voices, and it produces one audio file per line in the exact folder layout the
+  game expects. Two versions are available: the <strong>app</strong> (a normal desktop
+  program — what most people want) and the <strong>CLI</strong> (a command-line tool
+  for automation).</p>
+
+  <!-- ============================ THE APP ============================ -->
+  <h2>Download the app</h2>
+  <p class="sub">Install it like any other program. No terminal, no Python.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="os"><span class="emoji">🍎</span> macOS</div>
+      <div class="arch">Apple Silicon (M1–M5)</div>
+      <a class="dl" href="aigenaudio-app-macos-arm64.zip">Download <small>.zip</small></a>
+    </div>
+    <div class="card">
+      <div class="os"><span class="emoji">🪟</span> Windows</div>
+      <div class="arch">Intel / AMD (x64)</div>
+      <a class="dl" href="aigenaudio-app-windows-amd64.exe">Download <small>.exe</small></a>
+    </div>
+    <div class="card">
+      <div class="os"><span class="emoji">🪟</span> Windows</div>
+      <div class="arch">ARM (Surface Pro X, Snapdragon)</div>
+      <a class="dl" href="aigenaudio-app-windows-arm64.exe">Download <small>.exe</small></a>
+    </div>
+    <div class="card">
+      <div class="os"><span class="emoji">🐧</span> Linux</div>
+      <div class="arch">Intel / AMD (x64)</div>
+      <a class="dl" href="aigenaudio-app-linux-amd64.tar.gz">Download <small>.tar.gz</small></a>
+    </div>
+    <div class="card">
+      <div class="os"><span class="emoji">🐧</span> Linux</div>
+      <div class="arch">ARM (Graviton, ARM boards)</div>
+      <a class="dl" href="aigenaudio-app-linux-arm64.tar.gz">Download <small>.tar.gz</small></a>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Not sure which one?</strong>
+    <strong>Mac:</strong> use the macOS download (all recent Macs are Apple Silicon).
+    <strong>Windows:</strong> Settings → System → About → <em>System type</em> tells you
+    x64 or ARM. <strong>Linux:</strong> run <code>uname -m</code> — <code>x86_64</code>
+    is x64, <code>aarch64</code> is ARM.
+  </div>
+
+  <!-- ============================ THE CLI ============================ -->
+  <h2>Download the CLI</h2>
+  <p class="sub">A single command-line binary — for scripting and batch runs.</p>
+
+  <table>
+    <tr><th>Platform</th><th>File</th></tr>
+    <tr><td>macOS (Apple Silicon)</td><td><a href="aigenaudio-cli-macos-arm64">aigenaudio-cli-macos-arm64</a></td></tr>
+    <tr><td>Windows x64</td><td><a href="aigenaudio-cli-windows-amd64.exe">aigenaudio-cli-windows-amd64.exe</a></td></tr>
+    <tr><td>Windows ARM</td><td><a href="aigenaudio-cli-windows-arm64.exe">aigenaudio-cli-windows-arm64.exe</a></td></tr>
+    <tr><td>Linux x64</td><td><a href="aigenaudio-cli-linux-amd64">aigenaudio-cli-linux-amd64</a></td></tr>
+    <tr><td>Linux ARM</td><td><a href="aigenaudio-cli-linux-arm64">aigenaudio-cli-linux-arm64</a></td></tr>
+  </table>
+
+  <!-- ============================ INSTALL ============================ -->
+  <h2>Installing the app</h2>
+
+  <div class="note">
+    These builds aren't signed with a paid developer certificate yet, so macOS and
+    Windows show a one-time "unidentified developer" warning. The steps below get past
+    it safely.
+  </div>
+
+  <h3>🍎 macOS</h3>
+  <ol class="steps">
+    <li>Unzip the download and drag <strong>MHS Audio Generator.app</strong> into your <strong>Applications</strong> folder.</li>
+    <li>The first time, <strong>right-click the app → Open</strong>, then click <strong>Open</strong> in the dialog. (Double-clicking is blocked the first time because the app isn't signed — right-click → Open gets past it, just once.)</li>
+  </ol>
+
+  <h3>🪟 Windows</h3>
+  <ol class="steps">
+    <li>Double-click the <code>.exe</code>. If SmartScreen says "Windows protected your PC," click <strong>More info → Run anyway</strong>.</li>
+    <li>The app needs Microsoft's <strong>WebView2 runtime</strong>, already present on nearly all Windows 10/11 machines. If the window is blank, install it free from Microsoft and reopen.</li>
+  </ol>
+
+  <h3>🐧 Linux</h3>
+  <ol class="steps">
+    <li>Extract: <code>tar -xzf aigenaudio-app-linux-*.tar.gz</code></li>
+    <li>Make it runnable: <code>chmod +x aigenaudio</code></li>
+    <li>Install the runtime libraries:
+      <pre>sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0</pre>
+    </li>
+    <li>Run it: <code>./aigenaudio</code></li>
+  </ol>
+
+  <h2>ElevenLabs API key</h2>
+  <p>Both tools need an ElevenLabs API key. Sign in at
+  <a href="https://elevenlabs.io">elevenlabs.io</a>, create a key under your profile's
+  <strong>API Keys</strong>, and paste it into the app when prompted on first run (it's
+  saved to <code>~/.elevenlabs_key</code>, readable only by you). For the CLI, set
+  <code>ELEVENLABS_API_KEY</code> or save the key to <code>~/.elevenlabs_key</code>.
+  <strong>Never share the key</strong> — anyone with it can spend the account's credits.</p>
+
+  <footer>
+    MHS Audio Generator · Intelligence Builders. Downloads are hosted on our CDN.
+  </footer>
+
+</div>
+</body>
+</html>

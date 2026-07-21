@@ -1,3 +1,3 @@
-module github.com/dalemusser/aigenaudiotools
+module github.com/dalemusser/mhsaudiotools
 
 go 1.25.0

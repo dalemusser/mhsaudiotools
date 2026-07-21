@@ -1,4 +1,4 @@
-// Command aigenaudio is a thin terminal shell over the aigenaudiotools engine.
+// Command aigenaudio is a thin terminal shell over the mhsaudiotools engine.
 // It and the Wails app are both presentation layers; all behavior lives in
 // engine/.
 package main

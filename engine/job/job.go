@@ -19,11 +19,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dalemusser/aigenaudiotools/engine/output"
-	"github.com/dalemusser/aigenaudiotools/engine/source"
-	"github.com/dalemusser/aigenaudiotools/engine/synth"
-	"github.com/dalemusser/aigenaudiotools/engine/text"
-	"github.com/dalemusser/aigenaudiotools/engine/voice"
+	"github.com/dalemusser/mhsaudiotools/engine/output"
+	"github.com/dalemusser/mhsaudiotools/engine/source"
+	"github.com/dalemusser/mhsaudiotools/engine/synth"
+	"github.com/dalemusser/mhsaudiotools/engine/text"
+	"github.com/dalemusser/mhsaudiotools/engine/voice"
 )
 
 // manifestName records each written file's text hash, enabling idempotent
