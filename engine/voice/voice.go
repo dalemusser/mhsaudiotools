@@ -13,10 +13,13 @@ import (
 const PlayerCharacter = "Player"
 
 // Assignment binds a (non-player) character to a specific ElevenLabs voice.
+// Model selects which ElevenLabs model renders this voice (empty = the run's
+// default); it's how a config mixes v2 and v3 voices.
 type Assignment struct {
 	Character string `json:"character"`
 	VoiceID   string `json:"voiceId"`
 	VoiceName string `json:"voiceName"`
+	Model     string `json:"model,omitempty"`
 }
 
 // Slot binds a player voice to a fixed, 1-based slot number. Output for a player
@@ -26,6 +29,7 @@ type Slot struct {
 	Index     int    `json:"index"`
 	VoiceID   string `json:"voiceId"`
 	VoiceName string `json:"voiceName"`
+	Model     string `json:"model,omitempty"`
 }
 
 // Config is the full per-project voicing configuration. Persisted as JSON, it is
@@ -41,11 +45,13 @@ type Config struct {
 }
 
 // VoiceRef is a resolved voice for one output file. Slot is 0 for a single-voice
-// line, or the 1-based player slot number for a player line's fan-out.
+// line, or the 1-based player slot number for a player line's fan-out. Model is
+// the voice's model preference (empty = the run's default).
 type VoiceRef struct {
 	Slot      int
 	VoiceID   string
 	VoiceName string
+	Model     string
 }
 
 // Voicing is the set of voices one line renders with: exactly one for an NPC
@@ -69,15 +75,15 @@ func (c *Config) Resolve(speaker string, isPlayer bool) (Voicing, error) {
 			if s.VoiceID == "" {
 				return Voicing{}, fmt.Errorf("voice: player slot %d has no voice assigned", s.Index)
 			}
-			refs = append(refs, VoiceRef{Slot: s.Index, VoiceID: s.VoiceID, VoiceName: s.VoiceName})
+			refs = append(refs, VoiceRef{Slot: s.Index, VoiceID: s.VoiceID, VoiceName: s.VoiceName, Model: s.Model})
 		}
 		return Voicing{Voices: refs}, nil
 	}
 	if a, ok := c.VoiceFor(speaker); ok && a.VoiceID != "" {
-		return Voicing{Voices: []VoiceRef{{VoiceID: a.VoiceID, VoiceName: a.VoiceName}}}, nil
+		return Voicing{Voices: []VoiceRef{{VoiceID: a.VoiceID, VoiceName: a.VoiceName, Model: a.Model}}}, nil
 	}
 	if c.Default != nil && c.Default.VoiceID != "" {
-		return Voicing{Voices: []VoiceRef{{VoiceID: c.Default.VoiceID, VoiceName: c.Default.VoiceName}}}, nil
+		return Voicing{Voices: []VoiceRef{{VoiceID: c.Default.VoiceID, VoiceName: c.Default.VoiceName, Model: c.Default.Model}}}, nil
 	}
 	if speaker == "" {
 		return Voicing{}, fmt.Errorf("voice: line has no speaker and no default voice is set")

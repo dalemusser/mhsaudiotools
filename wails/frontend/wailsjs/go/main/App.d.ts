@@ -3,12 +3,21 @@
 import {main} from '../models';
 import {synth} from '../models';
 import {voice} from '../models';
+import {text} from '../models';
 
 export function Cancel():Promise<void>;
 
+export function CleanupRules(arg1:string):Promise<main.CleanupDTO>;
+
 export function DefaultCleanup():Promise<main.CleanupInfo>;
 
+export function DefaultEmotion():Promise<main.EmotionInfo>;
+
+export function EmotionRules(arg1:string):Promise<main.EmotionDTO>;
+
 export function ExportDefaultCleanup():Promise<main.CleanupInfo>;
+
+export function ExportDefaultEmotion():Promise<main.EmotionInfo>;
 
 export function FetchVoices():Promise<Array<synth.Voice>>;
 
@@ -24,6 +33,8 @@ export function LoadVoices(arg1:string):Promise<main.VoicesInfo>;
 
 export function PickCleanupFile():Promise<main.CleanupInfo>;
 
+export function PickEmotionFile():Promise<main.EmotionInfo>;
+
 export function PickOutputDir():Promise<string>;
 
 export function PickSourceFile():Promise<string>;
@@ -32,8 +43,20 @@ export function PickVoicesFile():Promise<string>;
 
 export function Preview(arg1:main.Request):Promise<main.Preview>;
 
+export function PreviewVoice(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function RevealOutput(arg1:string):Promise<void>;
+
+export function SaveCleanup(arg1:string,arg2:main.CleanupDTO):Promise<main.CleanupInfo>;
+
+export function SaveEmotion(arg1:string,arg2:main.EmotionDTO):Promise<main.EmotionInfo>;
 
 export function SaveKey(arg1:string):Promise<string>;
 
 export function SaveVoices(arg1:string,arg2:Array<voice.Assignment>,arg3:Array<voice.Slot>):Promise<main.VoicesInfo>;
+
+export function ScanForCleanup(arg1:string,arg2:string,arg3:Array<main.RuleDTO>):Promise<Array<text.Suggestion>>;
+
+export function TestCleanup(arg1:Array<main.RuleDTO>,arg2:string):Promise<string>;
+
+export function TestEmotion(arg1:main.EmotionDTO,arg2:string):Promise<string>;

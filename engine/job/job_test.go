@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/dalemusser/mhsaudiotools/engine/emotion"
 	"github.com/dalemusser/mhsaudiotools/engine/output"
 	"github.com/dalemusser/mhsaudiotools/engine/source"
 	"github.com/dalemusser/mhsaudiotools/engine/synth"
@@ -405,6 +407,80 @@ func TestRunSucceedsWhenSubscriptionLookupFails(t *testing.T) {
 	}
 	if res.Written != 5 {
 		t.Errorf("Written = %d, want 5", res.Written)
+	}
+}
+
+// The heart of version-awareness: emotion tags are applied to v3 voices only,
+// and each voice renders with its own model — including across a player line's
+// mixed-model slots.
+func TestRunVersionAwareEmotion(t *testing.T) {
+	dir := t.TempDir()
+	fc := &fakeClient{}
+	cfg := &voice.Config{
+		Assignments: []voice.Assignment{
+			{Character: "Toppo", VoiceID: "v-toppo", VoiceName: "Amy", Model: synth.ModelV3},
+			{Character: "Aryn", VoiceID: "v-aryn", VoiceName: "Haseeb", Model: synth.ModelV2},
+		},
+		PlayerSlots: []voice.Slot{
+			{Index: 1, VoiceID: "v-p1", VoiceName: "Brayden", Model: synth.ModelV2},
+			{Index: 2, VoiceID: "v-p2", VoiceName: "Yomiee", Model: synth.ModelV3},
+		},
+	}
+	r := &Runner{
+		Client:  fc,
+		Voices:  cfg,
+		Layout:  output.DialogSystem{},
+		Emotion: emotion.DefaultMap(),
+		Options: Options{OutputDir: dir},
+	}
+	lines := []source.LineItem{
+		{ID: "t1", Speaker: "Toppo", Text: "Hello (sighs) cadet."},   // v3 -> tag
+		{ID: "a1", Speaker: "Aryn", Text: "Careful (angry) now."},    // v2 -> no tag
+		{ID: "p1", Speaker: "Player", Text: "Understood (excited)!"}, // fan out: v2 slot + v3 slot
+	}
+	res, err := r.Run(context.Background(), lines)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Written != 4 { // 2 NPC + 1 player x 2 slots
+		t.Fatalf("Written = %d, want 4", res.Written)
+	}
+
+	byVoice := map[string]synth.Request{}
+	for _, req := range fc.requests {
+		byVoice[req.VoiceID] = req
+	}
+
+	// Toppo is v3: tag applied, model v3.
+	if r := byVoice["v-toppo"]; r.ModelID != synth.ModelV3 || !strings.HasPrefix(r.Text, "[sighs]") {
+		t.Errorf("Toppo(v3) = model %q text %q; want v3 + [sighs] prefix", r.ModelID, r.Text)
+	}
+	// Aryn is v2: same source direction, but NO tag, model v2.
+	if r := byVoice["v-aryn"]; r.ModelID != synth.ModelV2 || strings.Contains(r.Text, "[") {
+		t.Errorf("Aryn(v2) = model %q text %q; want v2 + no tag", r.ModelID, r.Text)
+	}
+	// Player slot 1 (v2): no tag. Slot 2 (v3): tag. Same line, different delivery.
+	if r := byVoice["v-p1"]; r.ModelID != synth.ModelV2 || strings.Contains(r.Text, "[") {
+		t.Errorf("Player1(v2) = model %q text %q; want v2 + no tag", r.ModelID, r.Text)
+	}
+	if r := byVoice["v-p2"]; r.ModelID != synth.ModelV3 || !strings.HasPrefix(r.Text, "[excited]") {
+		t.Errorf("Player2(v3) = model %q text %q; want v3 + [excited] prefix", r.ModelID, r.Text)
+	}
+}
+
+// Without an emotion map, directions are left in the text for cleanup to handle,
+// and the default model (v2) is used — i.e. current behavior is unchanged.
+func TestRunNoEmotionUsesDefaultModel(t *testing.T) {
+	dir := t.TempDir()
+	fc := &fakeClient{}
+	r := newRunner(t, fc, dir, Options{})
+	if _, err := r.Run(context.Background(), []source.LineItem{
+		{ID: "x", Speaker: "Toppo", Text: "Plain line."},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fc.requests[0].ModelID; got != synth.ModelV2 {
+		t.Errorf("model = %q, want default v2", got)
 	}
 }
 

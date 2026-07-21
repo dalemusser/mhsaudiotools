@@ -35,8 +35,10 @@ Both tools do the same thing: take **dialog**, apply your **voices**, and write
 2. **① Dialog source** — choose your `.csv` export or `.txt` script. Leave format on
    *Detect automatically* unless it guesses wrong.
 3. **② Voices** — choose your `voices.json`, or a `VoiceAssignments.csv` to import.
-   The panel shows each character's voice and the player slots; warnings appear if
-   something's missing.
+   The panel shows each character's voice and the player slots. Click **Edit…** to
+   open the voice editor: **Fetch voices from account** to pick voices by name from
+   dropdowns, add/remove characters, and set player slots, then Save. Use **▶** on
+   any row to hear that voice speak the preview line before committing.
 4. **③ Output** — choose the folder for the audio. Options:
    - **Layout** — leave on *Dialogue System (game)*.
    - **Audio** — MP3 quality.
@@ -46,6 +48,14 @@ Both tools do the same thing: take **dialog**, apply your **voices**, and write
      maximum, which is fastest. Lower it if a teammate is generating at the same
      time on the same account.
    - **Clean up text** (on), **Word timings** (off), **Regenerate everything** (off).
+     Under it, **Edit rules…** opens the cleanup editor: add/reorder/remove
+     remove & replace rules, **test a line** to see the result live, and **scan the
+     chosen source** to one-click add rules for markup that isn't handled yet.
+   - **Apply emotion (v3 tags)** — turns the writers' `(sighs)`/`(angry)` directions
+     into v3 audio tags, but only for voices set to **v3** in the voice editor (mark
+     them there with **Set models from voice type**, and ▶ to audition v3 vs v2).
+     **Edit tags…** opens the tag-map editor (direction → `[tag]`, an ignore list,
+     and a test box).
 5. **Preview** — shows what it *would* do (lines, files, characters, files-per-voice)
    without calling ElevenLabs or spending anything. Check the per-voice counts look
    right.

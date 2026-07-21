@@ -16,6 +16,7 @@ type Target struct {
 	RelPath   string // slash-separated, relative to the output root
 	VoiceID   string
 	VoiceName string
+	Model     string // voice's model preference (empty = the run's default)
 }
 
 // Layout maps a line and its resolved voicing to the audio files to produce.
@@ -46,7 +47,7 @@ func (DialogSystem) Targets(li source.LineItem, v voice.Voicing, ext string) ([]
 		if ref.Slot >= 1 {
 			rel = fmt.Sprintf("Player%d/%s%s", ref.Slot, li.ID, ext)
 		}
-		targets = append(targets, Target{RelPath: rel, VoiceID: ref.VoiceID, VoiceName: ref.VoiceName})
+		targets = append(targets, Target{RelPath: rel, VoiceID: ref.VoiceID, VoiceName: ref.VoiceName, Model: ref.Model})
 	}
 	return targets, nil
 }
@@ -73,7 +74,7 @@ func (BabylonManifest) Targets(li source.LineItem, v voice.Voicing, ext string) 
 		if ref.Slot >= 1 {
 			rel = fmt.Sprintf("%s/Player%d/%s%s", speaker, ref.Slot, li.ID, ext)
 		}
-		targets = append(targets, Target{RelPath: rel, VoiceID: ref.VoiceID, VoiceName: ref.VoiceName})
+		targets = append(targets, Target{RelPath: rel, VoiceID: ref.VoiceID, VoiceName: ref.VoiceName, Model: ref.Model})
 	}
 	return targets, nil
 }

@@ -18,10 +18,11 @@ const PlayerSpeaker = "Player"
 // verbatim (the Dialogue System matches audio to lines by ID), so adapters must
 // preserve the source ID exactly.
 type LineItem struct {
-	ID      string            // dialog ID; used verbatim as the output filename
-	Speaker string            // character name; PlayerSpeaker triggers fan-out
-	Text    string            // raw text as it came from the source (pre-cleanup)
-	Meta    map[string]string // optional source-specific extras
+	ID        string            // dialog ID; used verbatim as the output filename
+	Speaker   string            // character name; PlayerSpeaker triggers fan-out
+	Text      string            // raw text as it came from the source (pre-cleanup)
+	Direction string            // stage direction / delivery note (e.g. the export's Parenthetical field)
+	Meta      map[string]string // optional source-specific extras
 }
 
 // IsPlayer reports whether this line is spoken by the customizable player

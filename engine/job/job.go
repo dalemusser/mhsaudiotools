@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/dalemusser/mhsaudiotools/engine/emotion"
 	"github.com/dalemusser/mhsaudiotools/engine/output"
 	"github.com/dalemusser/mhsaudiotools/engine/source"
 	"github.com/dalemusser/mhsaudiotools/engine/synth"
@@ -35,6 +36,10 @@ type Options struct {
 	OutputDir      string
 	Format         synth.AudioFormat
 	WithTimestamps bool
+
+	// DefaultModel is the ElevenLabs model for voices that don't specify one
+	// (empty falls back to synth.ModelV2). A voice's own Model overrides this.
+	DefaultModel string
 
 	// Concurrency is the number of simultaneous API requests. Leave it 0 (or
 	// negative) to auto-detect the account's tier and use its full documented
@@ -86,6 +91,7 @@ type Runner struct {
 	Cleanup *text.Profile // optional; nil means no text cleanup
 	Voices  *voice.Config
 	Layout  output.Layout
+	Emotion *emotion.Map // optional; when set, v3 voices get audio tags from directions
 	Options Options
 
 	// OnProgress, if set, is called as units complete. It must be safe to call
@@ -93,11 +99,14 @@ type Runner struct {
 	OnProgress func(Progress)
 }
 
-// unit is one audio file to synthesize and write.
+// unit is one audio file to synthesize and write. Text and model are per-target:
+// a v3 voice gets emotion tags a v2 voice doesn't, so they differ across a player
+// line's slots.
 type unit struct {
 	lineID  string
 	relPath string
 	voiceID string
+	model   string
 	text    string
 	hash    string
 }
@@ -108,7 +117,8 @@ type PlanItem struct {
 	RelPath   string
 	VoiceID   string
 	VoiceName string
-	Text      string // the post-cleanup text that will actually be spoken
+	Model     string // the model this file renders with
+	Text      string // the exact text that will be sent (incl. any v3 audio tags)
 	UpToDate  bool   // already generated from this exact text; would be skipped
 }
 
@@ -181,6 +191,7 @@ func (r *Runner) Run(ctx context.Context, lines []source.LineItem) (*Result, err
 			lineID:  it.LineID,
 			relPath: it.RelPath,
 			voiceID: it.VoiceID,
+			model:   it.Model,
 			text:    it.Text,
 			hash:    hashText(it.Text),
 		})
@@ -207,18 +218,28 @@ func (r *Runner) planWith(lines []source.LineItem, man *manifest) *PlanResult {
 	p := &PlanResult{Lines: len(lines)}
 
 	for _, li := range lines {
-		spoken := li.Text
+		// Pull the writers' directions out first (so cleanup doesn't eat them),
+		// then clean the remaining text. Directions come from inline parentheticals
+		// and the source's structured Direction field.
+		base := li.Text
+		var directions []string
+		if r.Emotion != nil {
+			base, directions = emotion.Extract(li.Text)
+		}
+		if li.Direction != "" {
+			directions = append(directions, li.Direction)
+		}
 		if r.Cleanup != nil {
-			cleaned, err := r.Cleanup.Apply(li.Text)
+			cleaned, err := r.Cleanup.Apply(base)
 			if err != nil {
 				p.Errors = append(p.Errors, LineError{LineID: li.ID, Err: err})
 				p.Failed++
 				continue
 			}
-			spoken = cleaned
+			base = cleaned
 		}
-		spoken = strings.TrimSpace(spoken)
-		if spoken == "" {
+		base = strings.TrimSpace(base)
+		if base == "" {
 			p.SkippedLines++ // nothing left to say after cleanup
 			continue
 		}
@@ -236,27 +257,46 @@ func (r *Runner) planWith(lines []source.LineItem, man *manifest) *PlanResult {
 			continue
 		}
 
-		hash := hashText(spoken)
 		for _, tg := range targets {
 			p.Targets++
+			// Text and model are per-target: only v3 voices get the emotion tags.
+			model := r.modelFor(tg.Model)
+			text := base
+			if r.Emotion != nil && model == synth.ModelV3 {
+				text = r.Emotion.Apply(base, directions)
+			}
+			hash := hashText(text)
 			item := PlanItem{
 				LineID:    li.ID,
 				RelPath:   tg.RelPath,
 				VoiceID:   tg.VoiceID,
 				VoiceName: tg.VoiceName,
-				Text:      spoken,
+				Model:     model,
+				Text:      text,
 			}
 			if !r.Options.Force && man.upToDate(r.Options.OutputDir, tg.RelPath, hash) {
 				item.UpToDate = true
 				p.UpToDate++
 			} else {
 				p.ToGenerate++
-				p.Characters += len(spoken)
+				p.Characters += len(text)
 			}
 			p.Items = append(p.Items, item)
 		}
 	}
 	return p
+}
+
+// modelFor resolves a target's model: the voice's own, else the run default,
+// else v2.
+func (r *Runner) modelFor(voiceModel string) string {
+	if voiceModel != "" {
+		return voiceModel
+	}
+	if r.Options.DefaultModel != "" {
+		return r.Options.DefaultModel
+	}
+	return synth.ModelV2
 }
 
 // execute runs the units through a bounded worker pool.
@@ -351,6 +391,7 @@ func (r *Runner) renderOne(ctx context.Context, u unit) error {
 	out, err := r.Client.Synthesize(ctx, synth.Request{
 		VoiceID:        u.voiceID,
 		Text:           u.text,
+		ModelID:        u.model,
 		Format:         r.Options.Format,
 		WithTimestamps: r.Options.WithTimestamps,
 	})

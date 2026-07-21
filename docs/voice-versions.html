@@ -1,0 +1,212 @@
+<title>MHS Dialogue Voices — v2 / v3 Support</title>
+<style>
+  :root {
+    --bg: #f6f8fb; --card: #ffffff; --ink: #16202e; --muted: #5b6b80; --line: #e3e8ef;
+    --accent: #0369a1;
+    --good: #047857; --good-bg: #e7f6ef; --good-line: #c2e6d5;
+    --warn: #b45309; --warn-bg: #fbeedb; --warn-line: #f0d7ab;
+    --neutral: #5b6b80; --neutral-bg: #eceff4; --neutral-line: #dbe0e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1626; --card: #16202f; --ink: #e7edf5; --muted: #96a5ba; --line: #253247;
+      --accent: #57b6e8;
+      --good: #34d399; --good-bg: #112a20; --good-line: #214737;
+      --warn: #fbbf24; --warn-bg: #2a2012; --warn-line: #4a3a17;
+      --neutral: #96a5ba; --neutral-bg: #1b2536; --neutral-line: #2c3a4f;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f8fb; --card: #ffffff; --ink: #16202e; --muted: #5b6b80; --line: #e3e8ef;
+    --accent: #0369a1;
+    --good: #047857; --good-bg: #e7f6ef; --good-line: #c2e6d5;
+    --warn: #b45309; --warn-bg: #fbeedb; --warn-line: #f0d7ab;
+    --neutral: #5b6b80; --neutral-bg: #eceff4; --neutral-line: #dbe0e8;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1626; --card: #16202f; --ink: #e7edf5; --muted: #96a5ba; --line: #253247;
+    --accent: #57b6e8;
+    --good: #34d399; --good-bg: #112a20; --good-line: #214737;
+    --warn: #fbbf24; --warn-bg: #2a2012; --warn-line: #4a3a17;
+    --neutral: #96a5ba; --neutral-bg: #1b2536; --neutral-line: #2c3a4f;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 22px 96px; }
+
+  .eyebrow { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.11em; text-transform: uppercase; color: var(--accent); margin: 0 0 10px; }
+  h1 { font-size: clamp(1.7rem, 3.4vw, 2.25rem); line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 14px; text-wrap: balance; font-weight: 700; }
+  .lede { max-width: 66ch; color: var(--muted); margin: 0 0 8px; font-size: 1.02rem; }
+  .lede strong { color: var(--ink); }
+  .meta { color: var(--muted); font-size: 0.82rem; margin: 6px 0 0; max-width: 74ch; }
+  .meta code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--neutral-bg); padding: 1px 6px; border-radius: 5px; }
+
+  h2 { font-size: 1.18rem; letter-spacing: -0.01em; margin: 0 0 3px; }
+  .sec-note { color: var(--muted); font-size: 0.85rem; margin: 0 0 14px; max-width: 70ch; }
+  section { margin-top: 46px; }
+
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-top: 30px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .stat .k { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
+  .stat .row { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; }
+  .stat .big { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
+  .stat .of { color: var(--muted); font-size: 0.9rem; }
+  .stat .cap { margin-top: 10px; font-size: 0.82rem; color: var(--muted); line-height: 1.45; }
+
+  .tw { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 680px; }
+  thead th { text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; padding: 12px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  tbody td { padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  .who { font-weight: 650; }
+  .vname { font-weight: 550; }
+  .vid { display: block; margin-top: 2px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.7rem; color: var(--muted); }
+  .type { color: var(--muted); font-size: 0.86rem; }
+
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 0.74rem; font-weight: 650; white-space: nowrap; border: 1px solid transparent; }
+  .pill.good { color: var(--good); background: var(--good-bg); border-color: var(--good-line); }
+  .pill.warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-line); }
+  .pill.neutral { color: var(--neutral); background: var(--neutral-bg); border-color: var(--neutral-line); }
+
+  .tag-yes { color: var(--good); font-weight: 600; }
+  .tag-na { color: var(--muted); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 2px 0; font-size: 0.8rem; color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .dot.g { background: var(--good); } .dot.w { background: var(--warn); } .dot.n { background: var(--neutral); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 18px; }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .box h3 { margin: 0 0 8px; font-size: 0.95rem; }
+  .box p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+  .box ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 0.9rem; }
+  .box li { margin: 4px 0; }
+  code.tag { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--accent); }
+  strong.ink { color: var(--ink); }
+
+  footer { margin-top: 56px; border-top: 1px solid var(--line); padding-top: 18px; color: var(--muted); font-size: 0.82rem; max-width: 78ch; }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">MHS Audio Tools · Voice reference</p>
+    <h1>Dialogue voices &amp; ElevenLabs v3 support</h1>
+    <p class="lede">
+      Good news: <strong>every voice we use renders on v3</strong>, accepts emotion
+      tags, and returns word timings — verified by live test. The one wrinkle is the
+      five <em>professional-clone</em> voices: v3 renders them without their
+      professional fine-tuning, so they may sound less like the intended voice than
+      they do on v2. That's a <strong>listen-and-decide</strong> call per voice.
+    </p>
+    <p class="meta">Verified by live synthesis against the project account on <strong>21 July 2026</strong> — every voice returned audio on <code>eleven_v3</code>, and v3's <code>/with-timestamps</code> returned a populated alignment. The pro-clone caveat comes from the model flag <code>serves_pro_voices = false</code> (v3 doesn't apply the professional fine-tuning), so judge those by ear.</p>
+  </header>
+
+  <div class="summary">
+    <div class="stat">
+      <div class="k">Characters that can use v3 emotion</div>
+      <div class="row"><span class="big">8</span><span class="of">of 9</span></div>
+      <div class="cap">All except <strong>Automated System</strong>, whose voice isn't in the account library (verify separately).</div>
+    </div>
+    <div class="stat">
+      <div class="k">Player slots that can use v3 emotion</div>
+      <div class="row"><span class="big">6</span><span class="of">of 6</span></div>
+      <div class="cap">All six render on v3. Slots 1–2 are pro clones — review their v3 sound.</div>
+    </div>
+    <div class="stat">
+      <div class="k">To review by ear</div>
+      <div class="row"><span class="big">5</span><span class="of">pro clones</span></div>
+      <div class="cap">v3 drops their professional fine-tuning; decide v2 (best likeness, no emotion) vs v3 (emotion, base render).</div>
+    </div>
+  </div>
+
+  <!-- Characters -->
+  <section>
+    <h2>Named characters</h2>
+    <p class="sec-note">NPC voices from <code style="font-family:ui-monospace,monospace;font-size:0.85em;">VoiceAssignments.csv</code>. "v3 rendering" is how the voice comes out on v3.</p>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Character</th><th>Library voice</th><th>Voice type</th><th>v3 rendering</th><th>Emotion tags</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="who">Anderson</td><td><span class="vname">Gwen</span><span class="vid">tG5bw06DXQnuqEU3nPAq</span></td><td class="type">Generated</td><td><span class="pill good">Native</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">Aryn</td><td><span class="vname">Haseeb</span><span class="vid">w4Z9gYJrajAuQmheNbVn</span></td><td class="type">Professional clone</td><td><span class="pill warn">Base — review</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">Jasper</td><td><span class="vname">Ian</span><span class="vid">YsvxlKAiTeA2VGZGnQI9</span></td><td class="type">Generated</td><td><span class="pill good">Native</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">Tera</td><td><span class="vname">Hannah</span><span class="vid">98oS1BxL32fKBh1KbTej</span></td><td class="type">Generated</td><td><span class="pill good">Native</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">Toppo</td><td><span class="vname">Amy</span><span class="vid">zadbHdSgYi0Gxv83seiu</span></td><td class="type">Generated</td><td><span class="pill good">Native</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">DANI</td><td><span class="vname">Alex</span><span class="vid">wzsrSPwFvOZ38ICC2oVf</span></td><td class="type">Generated</td><td><span class="pill good">Native</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">Automated System</td><td><span class="vname">Thomas</span><span class="vid">GBv7mTt0atIp3Br8iCZE</span></td><td class="type">Not in account library</td><td><span class="pill neutral">Verify</span></td><td class="tag-na">Verify</td></tr>
+          <tr><td class="who">Mission Control</td><td><span class="vname">Dorian Chase</span><span class="vid">YVom6vJ8eyip50HaF8fc</span></td><td class="type">Professional clone</td><td><span class="pill warn">Base — review</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">ABIE</td><td><span class="vname">Finn</span><span class="vid">vBKc2FfBKJfcZNyEt1n6</span></td><td class="type">Professional clone</td><td><span class="pill warn">Base — review</span></td><td class="tag-yes">Available</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Player slots -->
+  <section>
+    <h2>Player voice slots</h2>
+    <p class="sec-note">The six voices a player can choose. Each slot number always maps to the same voice.</p>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Slot</th><th>Library voice</th><th>Voice type</th><th>v3 rendering</th><th>Emotion tags</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="who">Player 1</td><td><span class="vname">Brayden</span><span class="vid">3XOBzXhnDY98yeWQ3GdM</span></td><td class="type">Professional clone</td><td><span class="pill warn">Base — review</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">Player 2</td><td><span class="vname">Miranda</span><span class="vid">PoHUWWWMHFrA8z7Q88pu</span></td><td class="type">Professional clone</td><td><span class="pill warn">Base — review</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">Player 3</td><td><span class="vname">Yomiee</span><span class="vid">z5RTzOyJdFDd9rah0KmY</span></td><td class="type">Generated</td><td><span class="pill good">Native</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">Player 4</td><td><span class="vname">Nicoletta</span><span class="vid">GCvHMwMlEOnug5ZYBiUw</span></td><td class="type">Generated</td><td><span class="pill good">Native</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">Player 5</td><td><span class="vname">Tass</span><span class="vid">bBcZzZIfBJuKQqB3qXog</span></td><td class="type">Generated</td><td><span class="pill good">Native</span></td><td class="tag-yes">Available</td></tr>
+          <tr><td class="who">Player 6</td><td><span class="vname">Joey</span><span class="vid">ETaPGHnbwEZwP0ymNX3Y</span></td><td class="type">Generated</td><td><span class="pill good">Native</span></td><td class="tag-yes">Available</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <span><span class="dot g"></span><strong>Native</strong> — a Voice-Design voice; full v3 quality.</span>
+      <span><span class="dot w"></span><strong>Base — review</strong> — a Professional Clone; renders on v3 but without its pro fine-tuning, so likeness may differ.</span>
+      <span><span class="dot n"></span><strong>Verify</strong> — not in the account library.</span>
+    </div>
+  </section>
+
+  <!-- What it means -->
+  <section>
+    <h2>What this means for emotion</h2>
+    <p class="sec-note">The plan is to support <strong class="ink">both</strong> v2 and v3, choosing per voice and applying emotion tags only on the v3 ones.</p>
+    <div class="cards">
+      <div class="box">
+        <h3>Emotion is on the table for everyone</h3>
+        <p>v3 audio tags — <code class="tag">[excited]</code>, <code class="tag">[sighs]</code>, <code class="tag">[whispers]</code> — work on every voice we use, and v3 still returns word timings for captions. Nothing is blocked.</p>
+      </div>
+      <div class="box">
+        <h3>The pro-clone tradeoff</h3>
+        <p>Five voices are professional clones. On v3 they lose their professional fine-tuning, so they may drift from today's sound. For each, decide: <strong class="ink">v2</strong> (best likeness, flat delivery) or <strong class="ink">v3</strong> (emotion, base render).</p>
+        <ul>
+          <li>Aryn (Haseeb)</li>
+          <li>Mission Control (Dorian Chase)</li>
+          <li>ABIE (Finn)</li>
+          <li>Player 1 (Brayden), Player 2 (Miranda)</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>How to judge it</h3>
+        <p>Use the app's <strong class="ink">▶ preview</strong> to hear a pro-clone voice on v3 with a tag, next to its v2 version, and pick. The generated voices (everything else) are an easy yes to v3.</p>
+      </div>
+      <div class="box">
+        <h3>Loose end</h3>
+        <p><strong class="ink">Automated System (Thomas)</strong> isn't in the account's voice library — its ID resolves for playback, but confirm the voice and re-save it before relying on it.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Snapshot of the ElevenLabs account, verified by live synthesis at time of writing; availability and rendering can change if voices are re-created or swapped. Voice IDs shown for lookup in the ElevenLabs voice library.
+  </footer>
+
+</div>

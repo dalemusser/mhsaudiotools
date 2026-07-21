@@ -371,8 +371,43 @@ mhsaudio generate -in <source> -voices voices.json -out <dir> [-dry-run]
   (history, expiry). Formalized `simplescript` (speaker + default voice).
 
 **Phase 3**
-- Expressive `eleven_v3` audio tags ("how a line is said"). Pronunciation
-  dictionaries. Other ElevenLabs capabilities as warranted.
+- Expressive `eleven_v3` audio tags ("how a line is said") — **engine built**
+  (see below). UI/CLI exposure and pronunciation dictionaries still to come.
+
+---
+
+## 11a. Version-aware emotion (v3 audio tags)
+
+Verified live: **every voice we use renders on v3**, accepts audio tags, and
+returns word timings. The only nuance is that v3 doesn't apply a professional
+clone's fine-tuning (`serves_pro_voices=false`), so the 5 pro-clone voices render
+at base quality on v3 — a listen-and-decide per voice (see `docs/voice-versions.html`).
+So model is a **per-voice choice**, not a global switch.
+
+The engine supports it:
+- **Per-voice model** — `voice.Assignment.Model` / `voice.Slot.Model` (empty =
+  the run's `Options.DefaultModel`, else v2). Threaded through `VoiceRef` → `Target`.
+- **`engine/emotion`** — the writers already wrote the direction as parentheticals
+  (`(sighs)`, `(angry)`) inline and in the export's `Parenthetical` column
+  (`LineItem.Direction`). `emotion.Extract` pulls them out; an editable **tag map**
+  (`(sighs)` → `[sighs]`) converts them to v3 audio tags; `DefaultMap` seeds it
+  from what the scan surfaced.
+- **The job is version-aware per target**: text and model resolve per output file,
+  so a v3 voice gets `[tag] text` while a v2 voice gets plain text — including
+  across a player line's mixed-model slots. Directions are extracted before
+  cleanup (so cleanup can't eat them) and re-applied as tags only for v3.
+
+**UI (built):** the voice editor has a per-voice **model picker** (v2 / v3) with
+category-based auto-suggest ("Set models from voice type" → generated = v3,
+professional = v2), the ▶ preview honors the chosen model (audition v3 vs v2), and
+the generate options have an **"Apply emotion (v3 tags)"** toggle that runs the
+built-in tag map. `FetchVoices` now returns each voice's `category`.
+
+The **tag-map editor** is built too: add/edit direction→tag rows, an ignore list,
+and a test box showing what a line becomes on v3 — plus the same load/save/"use
+defaults"/"save defaults" controls as cleanup. The emotion UI is complete.
+
+Still to build: CLI flags (`-model`, `-emotion`) so the terminal path matches the app.
 
 ---
 

@@ -13,6 +13,7 @@ const state = {
   voicesInfo: null, // last loaded/saved voice config, seeds the editor
   outputDir: "",
   cleanupPath: "", // "" = built-in MHS defaults
+  emotionPath: "", // "" = built-in emotion map
   maxParallel: 4,
   running: false,
 };
@@ -57,9 +58,10 @@ const esc = (s) =>
 
 async function init() {
   try {
-    // Cleanup profile needs no key — show the built-in defaults up front.
+    // Cleanup + emotion maps need no key — show the built-in defaults up front.
     try {
       renderCleanup(await app().DefaultCleanup());
+      renderEmotion(await app().DefaultEmotion());
     } catch (e) {
       /* non-fatal */
     }
@@ -212,6 +214,8 @@ function request() {
     force: $("force").checked,
     cleanup: $("cleanup").checked,
     cleanupPath: state.cleanupPath,
+    emotion: $("emotion").checked,
+    emotionPath: state.emotionPath,
     defaultSpeaker: $("default-speaker").value.trim(),
   };
 }
@@ -254,6 +258,45 @@ $("save-default-cleanup").onclick = async () => {
     if (info) {
       renderCleanup(info);
       setStatus(`saved cleanup.json to ${info.path}`);
+    }
+  } catch (e) {
+    showError(e);
+  }
+};
+
+// --- emotion map display ----------------------------------------------------
+
+function renderEmotion(info) {
+  if (!info) return;
+  state.emotionPath = info.path || "";
+  $("emotion-name").textContent = info.builtIn ? "built-in defaults" : info.path;
+  $("emotion-name").title = info.path || "";
+  $("emotion-count").textContent = `${info.rules} tags, ${info.ignoreCount} ignored`;
+}
+
+$("pick-emotion").onclick = async () => {
+  try {
+    const info = await app().PickEmotionFile();
+    if (info) renderEmotion(info);
+  } catch (e) {
+    showError(e);
+  }
+};
+
+$("use-default-emotion").onclick = async () => {
+  try {
+    renderEmotion(await app().DefaultEmotion());
+  } catch (e) {
+    showError(e);
+  }
+};
+
+$("save-default-emotion").onclick = async () => {
+  try {
+    const info = await app().ExportDefaultEmotion();
+    if (info) {
+      renderEmotion(info);
+      setStatus(`saved emotions.json to ${info.path}`);
     }
   } catch (e) {
     showError(e);
@@ -387,7 +430,20 @@ $("reveal").onclick = async () => {
 const ve = {
   voiceList: [], // [{id, name}] fetched from the account
   voiceNames: {}, // id -> name, seeded from the config + fetched voices
+  voiceCategory: {}, // id -> "generated"/"professional"/… (for model suggestion)
 };
+
+const MODEL_V2 = "eleven_multilingual_v2";
+const MODEL_V3 = "eleven_v3";
+
+// veModelSelect builds the per-voice model picker (v2 default).
+function veModelSelect(model) {
+  const v3 = model === MODEL_V3;
+  return `<select class="ve-model input-sm" style="width:58px" title="Model for this voice">
+      <option value="${MODEL_V2}"${v3 ? "" : " selected"}>v2</option>
+      <option value="${MODEL_V3}"${v3 ? " selected" : ""}>v3</option>
+    </select>`;
+}
 
 // veVoiceOptions builds <option>s, always including the row's current voice even
 // if it isn't in the fetched list (so nothing is silently lost).
@@ -405,37 +461,81 @@ function veVoiceOptions(selectedId) {
   return html;
 }
 
-function veCharRow(character, voiceId) {
+function veCharRow(character, voiceId, model) {
   return `<div class="ve-row flex items-center gap-2">
       <input class="ve-name input-sm flex-1" placeholder="Character" value="${esc(character || "")}"/>
       <select class="ve-voice input-sm flex-1">${veVoiceOptions(voiceId || "")}</select>
+      ${veModelSelect(model)}
+      <button class="ve-play btn" title="Preview voice on its model">▶</button>
       <button class="ve-del btn" title="Remove">✕</button>
     </div>`;
 }
 
-function veSlotRow(n, voiceId) {
+function veSlotRow(n, voiceId, model) {
   return `<div class="ve-row flex items-center gap-2">
       <span class="ve-slot-label w-16 text-xs text-slate-400">Player${n}</span>
       <select class="ve-voice input-sm flex-1">${veVoiceOptions(voiceId || "")}</select>
+      ${veModelSelect(model)}
+      <button class="ve-play btn" title="Preview voice on its model">▶</button>
       <button class="ve-del btn" title="Remove">✕</button>
     </div>`;
 }
+
+// Audio preview: synthesize the sample line in a row's voice and play it. Only
+// one clip plays at a time.
+let vePlayer = null;
+
+async function vePreview(row, btn) {
+  const voiceId = row.querySelector(".ve-voice").value;
+  if (!voiceId) {
+    veError("Pick a voice on this row first.");
+    return;
+  }
+  const model = row.querySelector(".ve-model").value;
+  veError("");
+  const glyph = btn.textContent;
+  btn.textContent = "…";
+  btn.disabled = true;
+  try {
+    const uri = await app().PreviewVoice(voiceId, $("ve-sample").value, model);
+    if (vePlayer) vePlayer.pause();
+    vePlayer = new Audio(uri);
+    await vePlayer.play();
+  } catch (e) {
+    veError(String(e?.message || e));
+  } finally {
+    btn.textContent = glyph;
+    btn.disabled = false;
+  }
+}
+
+function vePlayHandler(container) {
+  container.addEventListener("click", (e) => {
+    const btn = e.target.closest(".ve-play");
+    if (!btn) return;
+    vePreview(btn.closest(".ve-row"), btn);
+  });
+}
+vePlayHandler($("ve-chars"));
+vePlayHandler($("ve-slots"));
 
 // scrape reads the current editor state from the DOM.
 function veScrape() {
   const chars = [...$("ve-chars").querySelectorAll(".ve-row")].map((row) => ({
     character: row.querySelector(".ve-name").value.trim(),
     voiceId: row.querySelector(".ve-voice").value,
+    model: row.querySelector(".ve-model").value,
   }));
   const slots = [...$("ve-slots").querySelectorAll(".ve-row")].map((row) => ({
     voiceId: row.querySelector(".ve-voice").value,
+    model: row.querySelector(".ve-model").value,
   }));
   return { chars, slots };
 }
 
 function veRender(data) {
-  $("ve-chars").innerHTML = data.chars.map((c) => veCharRow(c.character, c.voiceId)).join("");
-  $("ve-slots").innerHTML = data.slots.map((s, i) => veSlotRow(i + 1, s.voiceId)).join("");
+  $("ve-chars").innerHTML = data.chars.map((c) => veCharRow(c.character, c.voiceId, c.model)).join("");
+  $("ve-slots").innerHTML = data.slots.map((s, i) => veSlotRow(i + 1, s.voiceId, s.model)).join("");
 }
 
 function veRenumberSlots() {
@@ -449,11 +549,11 @@ function openVoiceEditor() {
   ve.voiceNames = {};
   const chars = (info.assignments || []).map((a) => {
     if (a.voiceId) ve.voiceNames[a.voiceId] = a.voiceName;
-    return { character: a.character, voiceId: a.voiceId };
+    return { character: a.character, voiceId: a.voiceId, model: a.model };
   });
   const slots = (info.playerSlots || []).map((s) => {
     if (s.voiceId) ve.voiceNames[s.voiceId] = s.voiceName;
-    return { voiceId: s.voiceId };
+    return { voiceId: s.voiceId, model: s.model };
   });
   veRender({ chars, slots });
   veError("");
@@ -505,8 +605,11 @@ $("ve-fetch").onclick = async () => {
   $("ve-status").textContent = "fetching…";
   try {
     const voices = await app().FetchVoices();
-    ve.voiceList = (voices || []).map((v) => ({ id: v.ID ?? v.id, name: v.Name ?? v.name }));
-    for (const v of ve.voiceList) ve.voiceNames[v.id] = v.name;
+    ve.voiceList = (voices || []).map((v) => ({ id: v.ID ?? v.id, name: v.Name ?? v.name, category: v.Category ?? v.category }));
+    for (const v of ve.voiceList) {
+      ve.voiceNames[v.id] = v.name;
+      ve.voiceCategory[v.id] = v.category;
+    }
     veRender(veScrape()); // rebuild dropdowns, preserving current selections
     $("ve-status").textContent = `${ve.voiceList.length} voices loaded`;
   } catch (e) {
@@ -515,15 +618,31 @@ $("ve-fetch").onclick = async () => {
   }
 };
 
+// Set each row's model from its voice's type: professional clones -> v2 (review
+// by ear), everything else (generated/premade) -> v3.
+$("ve-suggest-models").onclick = () => {
+  if (Object.keys(ve.voiceCategory).length === 0) {
+    veError("Fetch voices first so I can read each voice's type.");
+    return;
+  }
+  veError("");
+  const pick = (voiceId) => (ve.voiceCategory[voiceId] === "professional" ? MODEL_V2 : MODEL_V3);
+  const d = veScrape();
+  d.chars.forEach((c) => { if (c.voiceId && ve.voiceCategory[c.voiceId] !== undefined) c.model = pick(c.voiceId); });
+  d.slots.forEach((s) => { if (s.voiceId && ve.voiceCategory[s.voiceId] !== undefined) s.model = pick(s.voiceId); });
+  veRender(d);
+  $("ve-status").textContent = "models set from voice type — review the v2 (pro) ones by ear";
+};
+
 $("ve-save").onclick = async () => {
   const d = veScrape();
   const assignments = d.chars
     .filter((c) => c.character && c.voiceId)
-    .map((c) => ({ character: c.character, voiceId: c.voiceId, voiceName: ve.voiceNames[c.voiceId] || c.voiceId }));
+    .map((c) => ({ character: c.character, voiceId: c.voiceId, voiceName: ve.voiceNames[c.voiceId] || c.voiceId, model: c.model }));
   // Player slots keep DOM order; numbering is positional (Player1, Player2, …).
   const slots = d.slots
     .filter((s) => s.voiceId)
-    .map((s, i) => ({ index: i + 1, voiceId: s.voiceId, voiceName: ve.voiceNames[s.voiceId] || s.voiceId }));
+    .map((s, i) => ({ index: i + 1, voiceId: s.voiceId, voiceName: ve.voiceNames[s.voiceId] || s.voiceId, model: s.model }));
 
   const dropped = d.chars.length - assignments.length + (d.slots.length - slots.length);
   try {
@@ -534,6 +653,277 @@ $("ve-save").onclick = async () => {
     setStatus(dropped ? `voices saved (${dropped} incomplete row(s) skipped)` : "voices saved");
   } catch (e) {
     veError(String(e?.message || e));
+  }
+};
+
+// --- cleanup-rules editor ---------------------------------------------------
+//
+// Same DOM-driven scrape/render pattern as the voice editor. Rules are an ordered
+// list, so rows carry up/down. A test box applies the current rules live, and a
+// scan button reuses the engine's Suggest() to propose remove rules.
+
+const ce = { name: "mhs-dialogue" };
+
+const CE_KINDS = ["literal", "regex"];
+const CE_OPS = ["remove", "replace"];
+
+function ceSelect(cls, opts, sel) {
+  return `<select class="${cls} input-sm">${opts
+    .map((o) => `<option value="${o}"${o === sel ? " selected" : ""}>${o}</option>`)
+    .join("")}</select>`;
+}
+
+function ceRuleRow(r) {
+  return `<div class="ce-row flex items-center gap-1">
+      ${ceSelect("ce-kind", CE_KINDS, r.kind || "literal")}
+      ${ceSelect("ce-op", CE_OPS, r.op || "remove")}
+      <input class="ce-from input-sm flex-1 select-text" placeholder="from" value="${esc(r.from || "")}"/>
+      <input class="ce-to input-sm flex-1 select-text" placeholder="to (replace)" value="${esc(r.to || "")}"/>
+      <input class="ce-note input-sm flex-1 select-text" placeholder="note" value="${esc(r.note || "")}"/>
+      <button class="ce-up btn" title="Move up">↑</button>
+      <button class="ce-down btn" title="Move down">↓</button>
+      <button class="ce-del btn" title="Remove">✕</button>
+    </div>`;
+}
+
+function ceScrapeRules() {
+  return [...$("ce-rules").querySelectorAll(".ce-row")].map((row) => ({
+    kind: row.querySelector(".ce-kind").value,
+    op: row.querySelector(".ce-op").value,
+    from: row.querySelector(".ce-from").value,
+    to: row.querySelector(".ce-to").value,
+    note: row.querySelector(".ce-note").value,
+  }));
+}
+
+function ceRender(rules) {
+  $("ce-rules").innerHTML = rules.map(ceRuleRow).join("");
+}
+
+function ceError(msg) {
+  const el = $("ce-error");
+  el.textContent = msg || "";
+  el.classList.toggle("hidden", !msg);
+}
+
+async function openCleanupEditor() {
+  ceError("");
+  $("ce-status").textContent = "";
+  $("ce-suggestions").innerHTML = "";
+  $("ce-test-out").textContent = "";
+  try {
+    const dto = await app().CleanupRules(state.cleanupPath);
+    ce.name = dto.name || "cleanup";
+    $("ce-name").textContent = state.cleanupPath ? state.cleanupPath : "(built-in MHS defaults)";
+    ceRender(dto.rules || []);
+    $("cleanup-modal").classList.remove("hidden");
+  } catch (e) {
+    showError(e);
+  }
+}
+
+function closeCleanupEditor() {
+  $("cleanup-modal").classList.add("hidden");
+}
+
+$("edit-cleanup").onclick = openCleanupEditor;
+$("ce-cancel").onclick = closeCleanupEditor;
+
+$("ce-add").onclick = () => {
+  const rules = ceScrapeRules();
+  rules.push({ kind: "literal", op: "remove", from: "", to: "", note: "" });
+  ceRender(rules);
+};
+
+// Delegated row controls: up / down / delete.
+$("ce-rules").addEventListener("click", (e) => {
+  const btn = e.target.closest(".ce-up, .ce-down, .ce-del");
+  if (!btn) return;
+  const rules = ceScrapeRules();
+  const rows = [...$("ce-rules").querySelectorAll(".ce-row")];
+  const i = rows.indexOf(btn.closest(".ce-row"));
+  if (btn.classList.contains("ce-del")) {
+    rules.splice(i, 1);
+  } else if (btn.classList.contains("ce-up") && i > 0) {
+    [rules[i - 1], rules[i]] = [rules[i], rules[i - 1]];
+  } else if (btn.classList.contains("ce-down") && i < rules.length - 1) {
+    [rules[i + 1], rules[i]] = [rules[i], rules[i + 1]];
+  }
+  ceRender(rules);
+});
+
+// Live test: apply the current rules to the sample line.
+$("ce-test-in").oninput = async () => {
+  const sample = $("ce-test-in").value;
+  if (!sample) {
+    $("ce-test-out").textContent = "";
+    return;
+  }
+  try {
+    $("ce-test-out").textContent = await app().TestCleanup(ceScrapeRules(), sample);
+    $("ce-test-out").classList.remove("text-red-300");
+  } catch (e) {
+    $("ce-test-out").textContent = String(e?.message || e);
+    $("ce-test-out").classList.add("text-red-300");
+  }
+};
+
+$("ce-scan").onclick = async () => {
+  $("ce-status").textContent = "scanning…";
+  ceError("");
+  try {
+    const sugs = await app().ScanForCleanup(state.sourcePath, $("source-format").value, ceScrapeRules());
+    renderCleanupSuggestions(sugs || []);
+    $("ce-status").textContent = "";
+  } catch (e) {
+    $("ce-status").textContent = "";
+    ceError(String(e?.message || e));
+  }
+};
+
+function renderCleanupSuggestions(sugs) {
+  const box = $("ce-suggestions");
+  if (!sugs.length) {
+    box.innerHTML = `<div class="text-slate-500">Nothing unhandled found in the chosen source.</div>`;
+    return;
+  }
+  box.innerHTML = sugs
+    .map(
+      (s, i) => `<div class="flex items-start gap-2 rounded border border-slate-700 p-2">
+        <button class="ce-accept btn" data-i="${i}">Add rule</button>
+        <div class="min-w-0">
+          <div class="text-slate-300">${esc(s.description)} — ${commas(s.count)}×</div>
+          <div class="truncate text-slate-500">${esc((s.examples || []).slice(0, 6).join("   "))}</div>
+          <div class="text-slate-600">regex: <code>${esc(s.pattern)}</code></div>
+        </div>
+      </div>`
+    )
+    .join("");
+  // Wire the Add buttons against the current suggestion list.
+  box.querySelectorAll(".ce-accept").forEach((btn, idx) => {
+    btn.onclick = () => {
+      const s = sugs[idx];
+      const rules = ceScrapeRules();
+      rules.push({ kind: "regex", op: "remove", from: s.pattern, to: "", note: "from scan: " + s.description });
+      ceRender(rules);
+      btn.closest("div.flex").remove(); // consumed
+    };
+  });
+}
+
+$("ce-save").onclick = async () => {
+  ceError("");
+  try {
+    const info = await app().SaveCleanup(state.cleanupPath, { name: ce.name, rules: ceScrapeRules() });
+    if (!info) return; // dialog canceled
+    renderCleanup(info);
+    closeCleanupEditor();
+    setStatus("cleanup rules saved");
+  } catch (e) {
+    ceError(String(e?.message || e)); // e.g. an invalid regex, reported before writing
+  }
+};
+
+// --- emotion tag-map editor -------------------------------------------------
+//
+// Same DOM-driven pattern as the cleanup editor. Rows are direction→tag; the
+// ignore list is a textarea (one phrase per line); a test box shows what a line
+// becomes on v3.
+
+const em = { name: "mhs-emotion" };
+
+function emRuleRow(r) {
+  return `<div class="em-row grid grid-cols-[1fr_1fr_auto] gap-1 items-center">
+      <input class="em-phrase input-sm select-text" placeholder="sighs" value="${esc(r.phrase || "")}"/>
+      <input class="em-tag input-sm select-text" placeholder="[sighs]" value="${esc(r.tag || "")}"/>
+      <button class="em-del btn" title="Remove">✕</button>
+    </div>`;
+}
+
+function emScrapeRules() {
+  return [...$("em-rules").querySelectorAll(".em-row")].map((row) => ({
+    phrase: row.querySelector(".em-phrase").value,
+    tag: row.querySelector(".em-tag").value,
+  }));
+}
+
+function emRender(rules) {
+  $("em-rules").innerHTML = rules.map(emRuleRow).join("");
+}
+
+function emError(msg) {
+  const el = $("em-error");
+  el.textContent = msg || "";
+  el.classList.toggle("hidden", !msg);
+}
+
+function emDTO() {
+  const ignore = $("em-ignore").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  return { name: em.name, rules: emScrapeRules(), ignore };
+}
+
+async function openEmotionEditor() {
+  emError("");
+  $("em-status").textContent = "";
+  $("em-test-out").textContent = "";
+  try {
+    const dto = await app().EmotionRules(state.emotionPath);
+    em.name = dto.name || "emotion";
+    $("em-name").textContent = state.emotionPath ? state.emotionPath : "(built-in defaults)";
+    emRender(dto.rules || []);
+    $("em-ignore").value = (dto.ignore || []).join("\n");
+    $("emotion-modal").classList.remove("hidden");
+  } catch (e) {
+    showError(e);
+  }
+}
+
+function closeEmotionEditor() {
+  $("emotion-modal").classList.add("hidden");
+}
+
+$("edit-emotion").onclick = openEmotionEditor;
+$("em-cancel").onclick = closeEmotionEditor;
+
+$("em-add").onclick = () => {
+  const rules = emScrapeRules();
+  rules.push({ phrase: "", tag: "" });
+  emRender(rules);
+};
+
+$("em-rules").addEventListener("click", (e) => {
+  const btn = e.target.closest(".em-del");
+  if (!btn) return;
+  const rows = [...$("em-rules").querySelectorAll(".em-row")];
+  const i = rows.indexOf(btn.closest(".em-row"));
+  const rules = emScrapeRules();
+  rules.splice(i, 1);
+  emRender(rules);
+});
+
+$("em-test-in").oninput = async () => {
+  const sample = $("em-test-in").value;
+  if (!sample) {
+    $("em-test-out").textContent = "";
+    return;
+  }
+  try {
+    $("em-test-out").textContent = await app().TestEmotion(emDTO(), sample);
+  } catch (e) {
+    $("em-test-out").textContent = String(e?.message || e);
+  }
+};
+
+$("em-save").onclick = async () => {
+  emError("");
+  try {
+    const info = await app().SaveEmotion(state.emotionPath, emDTO());
+    if (!info) return;
+    renderEmotion(info);
+    closeEmotionEditor();
+    setStatus("emotion tags saved");
+  } catch (e) {
+    emError(String(e?.message || e));
   }
 };
 

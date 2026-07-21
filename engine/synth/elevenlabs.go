@@ -212,8 +212,9 @@ func (c *ElevenLabs) Voices(ctx context.Context) ([]Voice, error) {
 
 	var vr struct {
 		Voices []struct {
-			VoiceID string `json:"voice_id"`
-			Name    string `json:"name"`
+			VoiceID  string `json:"voice_id"`
+			Name     string `json:"name"`
+			Category string `json:"category"`
 		} `json:"voices"`
 	}
 	if err := json.Unmarshal(data, &vr); err != nil {
@@ -221,7 +222,7 @@ func (c *ElevenLabs) Voices(ctx context.Context) ([]Voice, error) {
 	}
 	out := make([]Voice, 0, len(vr.Voices))
 	for _, v := range vr.Voices {
-		out = append(out, Voice{ID: v.VoiceID, Name: v.Name})
+		out = append(out, Voice{ID: v.VoiceID, Name: v.Name, Category: v.Category})
 	}
 	return out, nil
 }

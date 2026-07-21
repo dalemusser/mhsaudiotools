@@ -6,12 +6,28 @@ export function Cancel() {
   return window['go']['main']['App']['Cancel']();
 }
 
+export function CleanupRules(arg1) {
+  return window['go']['main']['App']['CleanupRules'](arg1);
+}
+
 export function DefaultCleanup() {
   return window['go']['main']['App']['DefaultCleanup']();
 }
 
+export function DefaultEmotion() {
+  return window['go']['main']['App']['DefaultEmotion']();
+}
+
+export function EmotionRules(arg1) {
+  return window['go']['main']['App']['EmotionRules'](arg1);
+}
+
 export function ExportDefaultCleanup() {
   return window['go']['main']['App']['ExportDefaultCleanup']();
+}
+
+export function ExportDefaultEmotion() {
+  return window['go']['main']['App']['ExportDefaultEmotion']();
 }
 
 export function FetchVoices() {
@@ -42,6 +58,10 @@ export function PickCleanupFile() {
   return window['go']['main']['App']['PickCleanupFile']();
 }
 
+export function PickEmotionFile() {
+  return window['go']['main']['App']['PickEmotionFile']();
+}
+
 export function PickOutputDir() {
   return window['go']['main']['App']['PickOutputDir']();
 }
@@ -58,8 +78,20 @@ export function Preview(arg1) {
   return window['go']['main']['App']['Preview'](arg1);
 }
 
+export function PreviewVoice(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PreviewVoice'](arg1, arg2, arg3);
+}
+
 export function RevealOutput(arg1) {
   return window['go']['main']['App']['RevealOutput'](arg1);
+}
+
+export function SaveCleanup(arg1, arg2) {
+  return window['go']['main']['App']['SaveCleanup'](arg1, arg2);
+}
+
+export function SaveEmotion(arg1, arg2) {
+  return window['go']['main']['App']['SaveEmotion'](arg1, arg2);
 }
 
 export function SaveKey(arg1) {
@@ -68,4 +100,16 @@ export function SaveKey(arg1) {
 
 export function SaveVoices(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveVoices'](arg1, arg2, arg3);
+}
+
+export function ScanForCleanup(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ScanForCleanup'](arg1, arg2, arg3);
+}
+
+export function TestCleanup(arg1, arg2) {
+  return window['go']['main']['App']['TestCleanup'](arg1, arg2);
+}
+
+export function TestEmotion(arg1, arg2) {
+  return window['go']['main']['App']['TestEmotion'](arg1, arg2);
 }

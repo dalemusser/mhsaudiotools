@@ -6,6 +6,13 @@ package synth
 
 import "context"
 
+// Model IDs the app selects between. Both render every voice we use and both
+// return word timings; v3 additionally acts on inline audio tags (emotion).
+const (
+	ModelV2 = "eleven_multilingual_v2" // high quality; best professional-clone fidelity
+	ModelV3 = "eleven_v3"              // expressive; understands audio tags like [excited]
+)
+
 // AudioFormat is an ElevenLabs output_format identifier.
 type AudioFormat string
 
@@ -46,10 +53,13 @@ type Result struct {
 	Words []WordTiming // populated only when Request.WithTimestamps is true
 }
 
-// Voice is an available ElevenLabs voice.
+// Voice is an available ElevenLabs voice. Category ("generated", "professional",
+// "premade", …) drives the model suggestion: v3 doesn't apply a professional
+// clone's fine-tuning, so those are the ones to review.
 type Voice struct {
-	ID   string
-	Name string
+	ID       string
+	Name     string
+	Category string
 }
 
 // Subscription describes the account behind the API key. The API does not

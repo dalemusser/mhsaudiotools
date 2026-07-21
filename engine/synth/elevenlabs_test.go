@@ -133,7 +133,8 @@ func TestVoices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Voices error: %v", err)
 	}
-	want := []Voice{{ID: "a", Name: "Amy"}, {ID: "b", Name: "Ian"}}
+	// Category is parsed from the response ("premade" for a; absent for b).
+	want := []Voice{{ID: "a", Name: "Amy", Category: "premade"}, {ID: "b", Name: "Ian"}}
 	if len(voices) != len(want) {
 		t.Fatalf("got %d voices, want %d", len(voices), len(want))
 	}

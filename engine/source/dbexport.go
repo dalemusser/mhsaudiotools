@@ -30,14 +30,15 @@ const (
 // Zero-based columns of a DialogueEntries data row.
 // Header: entrytag,ConvID,ID,Actor,Conversant,Title,MenuText,DialogueText,…
 const (
-	colEntryTag     = 0
-	colConvID       = 1
-	colID           = 2
-	colActor        = 3
-	colConversant   = 4
-	colTitle        = 5
-	colMenuText     = 6
-	colDialogueText = 7
+	colEntryTag      = 0
+	colConvID        = 1
+	colID            = 2
+	colActor         = 3
+	colConversant    = 4
+	colTitle         = 5
+	colMenuText      = 6
+	colDialogueText  = 7
+	colParenthetical = 16 // the Dialogue System's structured stage-direction field
 )
 
 func (DBExport) Name() string { return "dbexport" }
@@ -106,11 +107,16 @@ func (DBExport) Parse(r io.Reader) ([]LineItem, error) {
 		if tag == "" {
 			continue
 		}
+		direction := ""
+		if len(rec) > colParenthetical {
+			direction = strings.TrimSpace(rec[colParenthetical])
+		}
 		items = append(items, LineItem{
-			ID:      tag,
-			Speaker: speakerFromTag(tag),
-			Text:    rec[colDialogueText],
-			Meta:    map[string]string{"conversation": strings.TrimSpace(rec[colConvID])},
+			ID:        tag,
+			Speaker:   speakerFromTag(tag),
+			Text:      rec[colDialogueText],
+			Direction: direction,
+			Meta:      map[string]string{"conversation": strings.TrimSpace(rec[colConvID])},
 		})
 	}
 	if !inSection {

@@ -119,6 +119,23 @@
       <label class="check"><input id="cleanup" type="checkbox" checked/> Clean up text</label>
       <label class="check"><input id="timestamps" type="checkbox"/> Word timings</label>
       <label class="check"><input id="force" type="checkbox"/> Regenerate everything</label>
+      <label class="check"><input id="emotion" type="checkbox"/> Apply emotion (v3 tags)</label>
+    </div>
+    <p class="mt-1 text-[11px] leading-snug text-slate-500">
+      Emotion applies only to voices set to <strong>v3</strong> in the voices editor —
+      it turns the writers’ <code>(sighs)</code> / <code>(angry)</code> directions into
+      v3 audio tags. v2 voices are unaffected.
+    </p>
+    <div id="emotion-block" class="mt-2">
+      <div class="flex flex-wrap items-center gap-2 text-xs">
+        <span class="label">Emotion tags</span>
+        <span id="emotion-name" class="text-slate-300">built-in defaults</span>
+        <span id="emotion-count" class="text-slate-500"></span>
+        <button id="edit-emotion" class="btn">Edit tags…</button>
+        <button id="pick-emotion" class="btn">Choose emotions.json…</button>
+        <button id="use-default-emotion" class="btn">Use defaults</button>
+        <button id="save-default-emotion" class="btn">Save defaults…</button>
+      </div>
     </div>
 
     <!-- Cleanup profile: which remove/replace rules to apply -->
@@ -127,6 +144,7 @@
         <span class="label">Cleanup rules</span>
         <span id="cleanup-name" class="text-slate-300">built-in MHS defaults</span>
         <span id="cleanup-count" class="text-slate-500"></span>
+        <button id="edit-cleanup" class="btn">Edit rules…</button>
         <button id="pick-cleanup" class="btn">Choose cleanup.json…</button>
         <button id="use-default-cleanup" class="btn">Use MHS defaults</button>
         <button id="save-default-cleanup" class="btn">Save MHS defaults…</button>
@@ -195,11 +213,20 @@
   <div class="w-full max-w-3xl max-h-[85vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-5">
     <div class="flex items-center justify-between mb-1">
       <h2 class="card-title">Edit voices</h2>
-      <button id="ve-fetch" class="btn">Fetch voices from account</button>
+      <div class="flex gap-2">
+        <button id="ve-suggest-models" class="btn">Set models from voice type</button>
+        <button id="ve-fetch" class="btn">Fetch voices from account</button>
+      </div>
     </div>
-    <p id="ve-fetch-note" class="text-[11px] text-slate-500 mb-4">
-      Fetch to pick voices by name from a dropdown; until then, each row keeps its current voice.
+    <p id="ve-fetch-note" class="text-[11px] text-slate-500 mb-3">
+      Fetch to pick voices by name and set each one’s model (v2 / v3). “Set models from
+      voice type” marks generated voices v3 and professional clones v2 — review the pro ones by ear.
     </p>
+    <div class="flex items-center gap-2 mb-4 text-xs">
+      <span class="label">Preview line</span>
+      <input id="ve-sample" class="input-sm flex-1 select-text" value="Good morning, cadets."/>
+      <span class="text-[11px] text-slate-500">▶ on a row plays this line in that voice.</span>
+    </div>
 
     <div class="flex items-center justify-between">
       <h3 class="subhead">Characters</h3>
@@ -224,6 +251,82 @@
       <button id="ve-save" class="btn-primary">Save</button>
       <button id="ve-cancel" class="btn">Cancel</button>
       <span id="ve-status" class="text-xs text-slate-500"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Cleanup-rules editor modal -->
+<div id="cleanup-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+  <div class="w-full max-w-4xl max-h-[88vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-5">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="card-title">Edit cleanup rules <span id="ce-name" class="text-xs font-normal text-slate-500"></span></h2>
+      <button id="ce-add" class="btn">+ Add rule</button>
+    </div>
+    <p class="text-[11px] text-slate-500 mb-3">
+      Rules run top-to-bottom — order matters. <em>remove</em> deletes matches of
+      <em>from</em>; <em>replace</em> swaps <em>from</em> → <em>to</em>. <em>regex</em>
+      treats <em>from</em> as a pattern.
+    </p>
+    <div id="ce-rules" class="space-y-1"></div>
+
+    <!-- Test a line -->
+    <div class="mt-5">
+      <h3 class="subhead">Test a line</h3>
+      <input id="ce-test-in" class="input-sm w-full mt-1 select-text" placeholder="Paste a dialog line to see the cleaned result…"/>
+      <div class="mt-1 text-xs"><span class="text-slate-500">→ </span><span id="ce-test-out" class="text-slate-300 select-text"></span></div>
+    </div>
+
+    <!-- Find missed markup -->
+    <div class="mt-5">
+      <div class="flex items-center justify-between">
+        <h3 class="subhead">Find missed markup</h3>
+        <button id="ce-scan" class="btn">Scan the chosen source</button>
+      </div>
+      <div id="ce-suggestions" class="mt-2 space-y-1 text-xs text-slate-400"></div>
+    </div>
+
+    <div id="ce-error" class="hidden mt-4 rounded border border-red-800 bg-red-950/40 p-2 text-xs text-red-200"></div>
+    <div class="mt-5 flex items-center gap-3">
+      <button id="ce-save" class="btn-primary">Save</button>
+      <button id="ce-cancel" class="btn">Cancel</button>
+      <span id="ce-status" class="text-xs text-slate-500"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Emotion tag-map editor modal -->
+<div id="emotion-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+  <div class="w-full max-w-3xl max-h-[88vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-5">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="card-title">Edit emotion tags <span id="em-name" class="text-xs font-normal text-slate-500"></span></h2>
+      <button id="em-add" class="btn">+ Add tag</button>
+    </div>
+    <p class="text-[11px] text-slate-500 mb-3">
+      Turn a writer’s direction into a v3 audio tag — <code>sighs</code> → <code>[sighs]</code>.
+      Matching is by exact (lowercased) phrase, so add each phrase you see in the dialog.
+      These apply only to voices set to v3.
+    </p>
+    <div class="grid grid-cols-[1fr_1fr_auto] gap-1 text-[11px] text-slate-500 px-1 mb-1">
+      <span>direction (as written)</span><span>v3 tag</span><span></span>
+    </div>
+    <div id="em-rules" class="space-y-1"></div>
+
+    <div class="mt-5">
+      <h3 class="subhead">Ignore these directions (drop, don’t voice or tag)</h3>
+      <textarea id="em-ignore" rows="3" class="input-sm w-full mt-1 select-text" placeholder="one per line, e.g. calling out from the island"></textarea>
+    </div>
+
+    <div class="mt-5">
+      <h3 class="subhead">Test a line</h3>
+      <input id="em-test-in" class="input-sm w-full mt-1 select-text" placeholder="Paste a line with (directions) to see the v3 text…"/>
+      <div class="mt-1 text-xs"><span class="text-slate-500">→ </span><span id="em-test-out" class="text-slate-300 select-text"></span></div>
+    </div>
+
+    <div id="em-error" class="hidden mt-4 rounded border border-red-800 bg-red-950/40 p-2 text-xs text-red-200"></div>
+    <div class="mt-5 flex items-center gap-3">
+      <button id="em-save" class="btn-primary">Save</button>
+      <button id="em-cancel" class="btn">Cancel</button>
+      <span id="em-status" class="text-xs text-slate-500"></span>
     </div>
   </div>
 </div>

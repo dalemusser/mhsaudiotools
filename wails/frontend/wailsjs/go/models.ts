@@ -20,6 +20,58 @@ export namespace main {
 	        this.characterLimit = source["characterLimit"];
 	    }
 	}
+	export class RuleDTO {
+	    kind: string;
+	    op: string;
+	    from: string;
+	    to: string;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RuleDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.op = source["op"];
+	        this.from = source["from"];
+	        this.to = source["to"];
+	        this.note = source["note"];
+	    }
+	}
+	export class CleanupDTO {
+	    name: string;
+	    rules: RuleDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CleanupDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.rules = this.convertValues(source["rules"], RuleDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class CleanupInfo {
 	    path: string;
 	    name: string;
@@ -44,6 +96,75 @@ export namespace main {
 	        this.builtIn = source["builtIn"];
 	    }
 	}
+	export class EmotionRuleDTO {
+	    phrase: string;
+	    tag: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmotionRuleDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.phrase = source["phrase"];
+	        this.tag = source["tag"];
+	    }
+	}
+	export class EmotionDTO {
+	    name: string;
+	    rules: EmotionRuleDTO[];
+	    ignore: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new EmotionDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.rules = this.convertValues(source["rules"], EmotionRuleDTO);
+	        this.ignore = source["ignore"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class EmotionInfo {
+	    path: string;
+	    name: string;
+	    rules: number;
+	    ignoreCount: number;
+	    builtIn: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmotionInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.rules = source["rules"];
+	        this.ignoreCount = source["ignoreCount"];
+	        this.builtIn = source["builtIn"];
+	    }
+	}
+	
 	export class SampleItem {
 	    relPath: string;
 	    voice: string;
@@ -134,6 +255,8 @@ export namespace main {
 	    force: boolean;
 	    cleanup: boolean;
 	    cleanupPath: string;
+	    emotion: boolean;
+	    emotionPath: string;
 	    defaultSpeaker: string;
 	
 	    static createFrom(source: any = {}) {
@@ -153,9 +276,12 @@ export namespace main {
 	        this.force = source["force"];
 	        this.cleanup = source["cleanup"];
 	        this.cleanupPath = source["cleanupPath"];
+	        this.emotion = source["emotion"];
+	        this.emotionPath = source["emotionPath"];
 	        this.defaultSpeaker = source["defaultSpeaker"];
 	    }
 	}
+	
 	export class RunSummary {
 	    written: number;
 	    upToDate: number;
@@ -240,6 +366,7 @@ export namespace synth {
 	export class Voice {
 	    ID: string;
 	    Name: string;
+	    Category: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Voice(source);
@@ -249,6 +376,30 @@ export namespace synth {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
 	        this.Name = source["Name"];
+	        this.Category = source["Category"];
+	    }
+	}
+
+}
+
+export namespace text {
+	
+	export class Suggestion {
+	    description: string;
+	    pattern: string;
+	    count: number;
+	    examples: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Suggestion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.description = source["description"];
+	        this.pattern = source["pattern"];
+	        this.count = source["count"];
+	        this.examples = source["examples"];
 	    }
 	}
 
@@ -260,6 +411,7 @@ export namespace voice {
 	    character: string;
 	    voiceId: string;
 	    voiceName: string;
+	    model?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Assignment(source);
@@ -270,12 +422,14 @@ export namespace voice {
 	        this.character = source["character"];
 	        this.voiceId = source["voiceId"];
 	        this.voiceName = source["voiceName"];
+	        this.model = source["model"];
 	    }
 	}
 	export class Slot {
 	    index: number;
 	    voiceId: string;
 	    voiceName: string;
+	    model?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Slot(source);
@@ -286,6 +440,7 @@ export namespace voice {
 	        this.index = source["index"];
 	        this.voiceId = source["voiceId"];
 	        this.voiceName = source["voiceName"];
+	        this.model = source["model"];
 	    }
 	}
 

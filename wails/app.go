@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dalemusser/mhsaudiotools/engine/emotion"
 	"github.com/dalemusser/mhsaudiotools/engine/job"
 	"github.com/dalemusser/mhsaudiotools/engine/keys"
 	"github.com/dalemusser/mhsaudiotools/engine/output"
@@ -211,6 +213,35 @@ func (a *App) SaveVoices(path string, assignments []voice.Assignment, slots []vo
 	}, nil
 }
 
+// previewSample is spoken when previewing a voice with no custom text.
+const previewSample = "Good morning, cadets. This is a voice preview."
+
+// PreviewVoice synthesizes a short sample in the given voice and model, returning
+// it as a base64 audio data URI the UI can play — so an artist can hear a voice
+// (and audition v2 vs v3) before committing. An empty model uses v2.
+func (a *App) PreviewVoice(voiceID, sample, model string) (string, error) {
+	if voiceID == "" {
+		return "", fmt.Errorf("pick a voice to preview")
+	}
+	if strings.TrimSpace(sample) == "" {
+		sample = previewSample
+	}
+	key, err := keys.Resolve()
+	if err != nil {
+		return "", err
+	}
+	res, err := synth.NewElevenLabs(key).Synthesize(a.ctx, synth.Request{
+		VoiceID: voiceID,
+		Text:    sample,
+		ModelID: model,
+		Format:  synth.MP3_44100_128,
+	})
+	if err != nil {
+		return "", err
+	}
+	return "data:audio/mpeg;base64," + base64.StdEncoding.EncodeToString(res.Audio), nil
+}
+
 // FetchVoices lists the account's voices so the UI can offer a picker instead of
 // asking anyone to paste a voice ID.
 func (a *App) FetchVoices() ([]synth.Voice, error) {
@@ -275,6 +306,130 @@ func (a *App) PickCleanupFile() (*CleanupInfo, error) {
 	return cleanupInfo(path, p, false), nil
 }
 
+// RuleDTO / CleanupDTO mirror text.Rule/Profile with plain-string enums, so the
+// JS editor exchanges rules as readable "literal"/"regex", "remove"/"replace"
+// rather than the marshaled enum ints.
+type RuleDTO struct {
+	Kind string `json:"kind"` // "literal" | "regex"
+	Op   string `json:"op"`   // "remove" | "replace"
+	From string `json:"from"`
+	To   string `json:"to"`
+	Note string `json:"note"`
+}
+
+type CleanupDTO struct {
+	Name  string    `json:"name"`
+	Rules []RuleDTO `json:"rules"`
+}
+
+func dtoFromProfile(p *text.Profile) CleanupDTO {
+	dto := CleanupDTO{Name: p.Name, Rules: make([]RuleDTO, 0, len(p.Rules))}
+	for _, r := range p.Rules {
+		dto.Rules = append(dto.Rules, RuleDTO{
+			Kind: r.Kind.String(), Op: r.Op.String(), From: r.From, To: r.To, Note: r.Note,
+		})
+	}
+	return dto
+}
+
+func profileFromDTO(dto CleanupDTO) (*text.Profile, error) {
+	p := &text.Profile{Name: dto.Name}
+	for i, d := range dto.Rules {
+		var k text.RuleKind
+		switch d.Kind {
+		case "literal":
+			k = text.RuleLiteral
+		case "regex":
+			k = text.RuleRegex
+		default:
+			return nil, fmt.Errorf("rule %d: unknown kind %q", i+1, d.Kind)
+		}
+		var op text.RuleOp
+		switch d.Op {
+		case "remove":
+			op = text.OpRemove
+		case "replace":
+			op = text.OpReplace
+		default:
+			return nil, fmt.Errorf("rule %d: unknown op %q", i+1, d.Op)
+		}
+		p.Rules = append(p.Rules, text.Rule{Kind: k, Op: op, From: d.From, To: d.To, Note: d.Note})
+	}
+	return p, nil
+}
+
+// CleanupRules returns the editable rules for a profile — built-in MHS defaults
+// when path is empty, else the file's rules.
+func (a *App) CleanupRules(path string) (*CleanupDTO, error) {
+	if path == "" {
+		dto := dtoFromProfile(text.MHSProfile())
+		return &dto, nil
+	}
+	p, err := text.LoadProfile(path)
+	if err != nil {
+		return nil, err
+	}
+	dto := dtoFromProfile(p)
+	return &dto, nil
+}
+
+// TestCleanup applies the given rules to a sample line, so the editor can show
+// the effect live (and surface a bad regex immediately).
+func (a *App) TestCleanup(rules []RuleDTO, sample string) (string, error) {
+	p, err := profileFromDTO(CleanupDTO{Rules: rules})
+	if err != nil {
+		return "", err
+	}
+	return p.Apply(sample)
+}
+
+// ScanForCleanup scans the chosen dialog source for markup the given rules don't
+// remove, so the editor can suggest new remove rules.
+func (a *App) ScanForCleanup(sourcePath, sourceFormat string, rules []RuleDTO) ([]text.Suggestion, error) {
+	if sourcePath == "" {
+		return nil, fmt.Errorf("choose a dialog source (step 1) first, so there's something to scan")
+	}
+	lines, _, err := loadLines(sourcePath, sourceFormat)
+	if err != nil {
+		return nil, err
+	}
+	p, err := profileFromDTO(CleanupDTO{Rules: rules})
+	if err != nil {
+		return nil, err
+	}
+	texts := make([]string, len(lines))
+	for i, li := range lines {
+		texts[i] = li.Text
+	}
+	return text.Suggest(texts, p)
+}
+
+// SaveCleanup validates and writes the edited rules; a blank path opens a save
+// dialog. Returns the saved profile's summary.
+func (a *App) SaveCleanup(path string, dto CleanupDTO) (*CleanupInfo, error) {
+	p, err := profileFromDTO(dto)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	if path == "" {
+		sp, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+			Title:           "Save cleanup.json",
+			DefaultFilename: "cleanup.json",
+		})
+		if err != nil || sp == "" {
+			return nil, err
+		}
+		path = sp
+	}
+	if err := p.Save(path); err != nil {
+		return nil, err
+	}
+	return cleanupInfo(path, p, false), nil
+}
+
 // ExportDefaultCleanup writes the built-in MHS rules to a file the team can edit
 // and share (the one shared cleanup.json), then selects it. Returns its summary.
 func (a *App) ExportDefaultCleanup() (*CleanupInfo, error) {
@@ -292,6 +447,138 @@ func (a *App) ExportDefaultCleanup() (*CleanupInfo, error) {
 	return cleanupInfo(path, p, false), nil
 }
 
+// --- emotion tag map --------------------------------------------------------
+
+// EmotionRuleDTO is one direction→tag mapping for the editor.
+type EmotionRuleDTO struct {
+	Phrase string `json:"phrase"` // e.g. "sighs"
+	Tag    string `json:"tag"`    // e.g. "[sighs]"
+}
+
+// EmotionDTO mirrors emotion.Map as an ordered list for editing.
+type EmotionDTO struct {
+	Name   string           `json:"name"`
+	Rules  []EmotionRuleDTO `json:"rules"`
+	Ignore []string         `json:"ignore"`
+}
+
+// EmotionInfo summarizes an emotion map for display.
+type EmotionInfo struct {
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	Rules       int    `json:"rules"`
+	IgnoreCount int    `json:"ignoreCount"`
+	BuiltIn     bool   `json:"builtIn"`
+}
+
+func emotionDTOFromMap(m *emotion.Map) EmotionDTO {
+	dto := EmotionDTO{Name: m.Name, Ignore: append([]string(nil), m.Ignore...)}
+	keys := make([]string, 0, len(m.Tags))
+	for k := range m.Tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys) // stable display order
+	for _, k := range keys {
+		dto.Rules = append(dto.Rules, EmotionRuleDTO{Phrase: k, Tag: m.Tags[k]})
+	}
+	return dto
+}
+
+func mapFromEmotionDTO(dto EmotionDTO) *emotion.Map {
+	m := &emotion.Map{Name: dto.Name, Tags: map[string]string{}, Ignore: dto.Ignore}
+	for _, r := range dto.Rules {
+		phrase := strings.ToLower(strings.TrimSpace(r.Phrase))
+		tag := strings.TrimSpace(r.Tag)
+		if phrase == "" || tag == "" {
+			continue
+		}
+		m.Tags[phrase] = tag
+	}
+	return m
+}
+
+func emotionInfo(path string, m *emotion.Map, builtIn bool) *EmotionInfo {
+	return &EmotionInfo{Path: path, Name: m.Name, Rules: len(m.Tags), IgnoreCount: len(m.Ignore), BuiltIn: builtIn}
+}
+
+// DefaultEmotion summarizes the built-in emotion map.
+func (a *App) DefaultEmotion() *EmotionInfo { return emotionInfo("", emotion.DefaultMap(), true) }
+
+// EmotionRules returns the editable direction→tag rows (built-in defaults if
+// path is empty).
+func (a *App) EmotionRules(path string) (*EmotionDTO, error) {
+	if path == "" {
+		dto := emotionDTOFromMap(emotion.DefaultMap())
+		return &dto, nil
+	}
+	m, err := emotion.LoadMap(path)
+	if err != nil {
+		return nil, err
+	}
+	dto := emotionDTOFromMap(m)
+	return &dto, nil
+}
+
+// TestEmotion shows what a sample line becomes on v3: it extracts the
+// parentheticals and applies the map's tags.
+func (a *App) TestEmotion(dto EmotionDTO, sample string) (string, error) {
+	m := mapFromEmotionDTO(dto)
+	clean, dirs := emotion.Extract(sample)
+	return m.Apply(clean, dirs), nil
+}
+
+// PickEmotionFile opens a dialog for an emotions.json and returns its summary.
+func (a *App) PickEmotionFile() (*EmotionInfo, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:   "Choose an emotions.json",
+		Filters: []runtime.FileFilter{{DisplayName: "Emotion map (*.json)", Pattern: "*.json"}},
+	})
+	if err != nil || path == "" {
+		return nil, err
+	}
+	m, err := emotion.LoadMap(path)
+	if err != nil {
+		return nil, err
+	}
+	return emotionInfo(path, m, false), nil
+}
+
+// ExportDefaultEmotion writes the built-in emotion map to a file to edit and
+// share, then selects it.
+func (a *App) ExportDefaultEmotion() (*EmotionInfo, error) {
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save emotions.json (defaults, to edit and share)",
+		DefaultFilename: "emotions.json",
+	})
+	if err != nil || path == "" {
+		return nil, err
+	}
+	m := emotion.DefaultMap()
+	if err := m.Save(path); err != nil {
+		return nil, err
+	}
+	return emotionInfo(path, m, false), nil
+}
+
+// SaveEmotion writes the edited map; a blank path opens a save dialog.
+func (a *App) SaveEmotion(path string, dto EmotionDTO) (*EmotionInfo, error) {
+	m := mapFromEmotionDTO(dto)
+	if path == "" {
+		sp, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+			Title:           "Save emotions.json",
+			DefaultFilename: "emotions.json",
+		})
+		if err != nil || sp == "" {
+			return nil, err
+		}
+		path = sp
+	}
+	if err := m.Save(path); err != nil {
+		return nil, err
+	}
+	return emotionInfo(path, m, false), nil
+}
+
 // --- generate ---------------------------------------------------------------
 
 // Request is everything the UI collects for a run.
@@ -307,6 +594,8 @@ type Request struct {
 	Force          bool   `json:"force"`
 	Cleanup        bool   `json:"cleanup"`
 	CleanupPath    string `json:"cleanupPath"` // custom cleanup.json; empty = built-in MHS defaults
+	Emotion        bool   `json:"emotion"`     // apply v3 audio tags to v3 voices
+	EmotionPath    string `json:"emotionPath"` // custom emotions.json; empty = built-in defaults
 	DefaultSpeaker string `json:"defaultSpeaker"`
 }
 
@@ -538,6 +827,20 @@ func (a *App) build(req Request) (*job.Runner, []source.LineItem, string, error)
 			profile = text.MHSProfile()
 		}
 	}
+
+	var emo *emotion.Map
+	if req.Emotion {
+		if req.EmotionPath != "" {
+			m, err := emotion.LoadMap(req.EmotionPath)
+			if err != nil {
+				return nil, nil, "", fmt.Errorf("emotion map: %w", err)
+			}
+			emo = m
+		} else {
+			emo = emotion.DefaultMap()
+		}
+	}
+
 	layout, err := pickLayout(req.Layout)
 	if err != nil {
 		return nil, nil, "", err
@@ -551,6 +854,7 @@ func (a *App) build(req Request) (*job.Runner, []source.LineItem, string, error)
 		Cleanup: profile,
 		Voices:  cfg,
 		Layout:  layout,
+		Emotion: emo,
 		Options: job.Options{
 			OutputDir:      req.OutputDir,
 			Format:         synth.AudioFormat(format),

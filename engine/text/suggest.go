@@ -8,10 +8,10 @@ import (
 // Suggestion is a family of look-alike tokens a scan found in the dialog that a
 // cleanup profile doesn't yet handle — a candidate remove rule.
 type Suggestion struct {
-	Description string   // human label, e.g. "square-bracket tags [ … ]"
-	Pattern     string   // regex to use as the From of a remove rule
-	Count       int      // total occurrences across the scanned text
-	Examples    []string // distinct sample matches, most frequent first
+	Description string   `json:"description"` // human label, e.g. "square-bracket tags [ … ]"
+	Pattern     string   `json:"pattern"`     // regex to use as the From of a remove rule
+	Count       int      `json:"count"`       // total occurrences across the scanned text
+	Examples    []string `json:"examples"`    // distinct sample matches, most frequent first
 }
 
 // Rule turns a suggestion into the remove rule the user would add if they accept it.
