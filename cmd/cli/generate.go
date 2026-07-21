@@ -42,9 +42,9 @@ func runGenerate(args []string) error {
 		fmt.Fprintf(os.Stderr, "Generate audio for a dialog source.\n\nFlags:\n")
 		fs.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n"+
-			"  aigenaudio generate -in export.csv -voices voices.json -out ./audio -dry-run\n"+
-			"  aigenaudio generate -in export.csv -voices voices.json -out ./audio\n"+
-			"  aigenaudio generate -in lessons.txt -voices voices.csv -out ./lessons -default-speaker Toppo\n")
+			"  mhsaudio generate -in export.csv -voices voices.json -out ./audio -dry-run\n"+
+			"  mhsaudio generate -in export.csv -voices voices.json -out ./audio\n"+
+			"  mhsaudio generate -in lessons.txt -voices voices.csv -out ./lessons -default-speaker Toppo\n")
 	}
 	if err := fs.Parse(args); err != nil {
 		return err

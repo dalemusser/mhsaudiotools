@@ -1,4 +1,4 @@
-// Command aigenaudio is a thin terminal shell over the mhsaudiotools engine.
+// Command mhsaudio is a thin terminal shell over the mhsaudiotools engine.
 // It and the Wails app are both presentation layers; all behavior lives in
 // engine/.
 package main
@@ -8,10 +8,10 @@ import (
 	"os"
 )
 
-const usage = `aigenaudio — generate game dialog audio with ElevenLabs
+const usage = `mhsaudio — generate game dialog audio with ElevenLabs
 
 Usage:
-  aigenaudio <command> [flags]
+  mhsaudio <command> [flags]
 
 Commands:
   generate        Generate audio for a dialog source (use -dry-run to preview)
@@ -19,7 +19,7 @@ Commands:
   account         Show the account tier and its max concurrency
   import-voices   Convert/merge a VoiceAssignments.csv into a voices.json config
 
-Run "aigenaudio <command> -h" for a command's flags.
+Run "mhsaudio <command> -h" for a command's flags.
 
 The API key is read from $ELEVENLABS_API_KEY, or -key-file, or ~/.elevenlabs_key.
 `

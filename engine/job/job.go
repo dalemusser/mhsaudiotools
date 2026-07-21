@@ -28,7 +28,7 @@ import (
 
 // manifestName records each written file's text hash, enabling idempotent
 // re-runs (regenerate only what changed).
-const manifestName = ".aigenaudio-manifest.json"
+const manifestName = ".mhsaudio-manifest.json"
 
 // Options configures a generation run.
 type Options struct {

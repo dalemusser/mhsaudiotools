@@ -268,7 +268,7 @@ A generation run is a first‑class **Job**, implemented as plan → execute:
    targets; skip targets already up to date.
 2. **Execute**: run the remaining targets through a **bounded worker pool**.
 
-- **Idempotent / resumable** — a manifest (`.aigenaudio-manifest.json` in the
+- **Idempotent / resumable** — a manifest (`.mhsaudio-manifest.json` in the
   output folder) maps each output file to the SHA‑1 of the text it was generated
   from; a re‑run regenerates only changed/missing files. `Force` redoes
   everything. (The ceremony tool did this; the DB‑export tool did not — now every
@@ -328,10 +328,10 @@ call. It exists for Dale/automation and to prove the engine end‑to‑end befor
 UI exists; artists get the desktop app, not this.
 
 ```
-aigenaudio account                     # tier + max concurrency
-aigenaudio voices [-filter tera]       # the account's voices, for picking IDs
-aigenaudio import-voices -csv VoiceAssignments.csv -out voices.json
-aigenaudio generate -in <source> -voices voices.json -out <dir> [-dry-run]
+mhsaudio account                     # tier + max concurrency
+mhsaudio voices [-filter tera]       # the account's voices, for picking IDs
+mhsaudio import-voices -csv VoiceAssignments.csv -out voices.json
+mhsaudio generate -in <source> -voices voices.json -out <dir> [-dry-run]
 ```
 
 `generate` flags: `-source` (auto|dbexport|simplescript), `-layout`, `-format`,

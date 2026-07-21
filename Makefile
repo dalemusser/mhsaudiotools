@@ -22,7 +22,7 @@
 # so every go command must ignore that workspace.
 export GOWORK := off
 
-BIN     := aigenaudio
+BIN     := mhsaudio
 DIST    := dist
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w
@@ -101,16 +101,16 @@ app-macos:
 	@mkdir -p $(DIST)
 	cd wails && wails build -platform darwin/arm64
 	@rm -rf "wails/build/bin/MHS Audio Generator.app"
-	mv "wails/build/bin/aigenaudio.app" "wails/build/bin/MHS Audio Generator.app"
+	mv "wails/build/bin/mhsaudio.app" "wails/build/bin/MHS Audio Generator.app"
 	cd wails/build/bin && ditto -c -k --sequesterRsrc --keepParent \
-		"MHS Audio Generator.app" "$(CURDIR)/$(DIST)/aigenaudio-app-macos-arm64.zip"
-	@echo "built $(DIST)/aigenaudio-app-macos-arm64.zip"
+		"MHS Audio Generator.app" "$(CURDIR)/$(DIST)/mhsaudio-app-macos-arm64.zip"
+	@echo "built $(DIST)/mhsaudio-app-macos-arm64.zip"
 
 # Any host (Windows is cgo-free): both Windows arches.
 app-windows:
 	@mkdir -p $(DIST)
-	cd wails && wails build -platform windows/amd64 && cp build/bin/aigenaudio.exe "$(CURDIR)/$(DIST)/aigenaudio-app-windows-amd64.exe"
-	cd wails && wails build -platform windows/arm64 && cp build/bin/aigenaudio.exe "$(CURDIR)/$(DIST)/aigenaudio-app-windows-arm64.exe"
+	cd wails && wails build -platform windows/amd64 && cp build/bin/mhsaudio.exe "$(CURDIR)/$(DIST)/mhsaudio-app-windows-amd64.exe"
+	cd wails && wails build -platform windows/arm64 && cp build/bin/mhsaudio.exe "$(CURDIR)/$(DIST)/mhsaudio-app-windows-arm64.exe"
 	@echo "built Windows app exes in $(DIST)/"
 
 # Stage the download page + all built binaries for upload to the CDN.
@@ -119,7 +119,7 @@ app-windows:
 cdn:
 	@mkdir -p $(CDN)
 	cp web/index.html $(CDN)/
-	@cp $(DIST)/aigenaudio-app-* $(DIST)/aigenaudio-cli-* $(CDN)/ 2>/dev/null || true
+	@cp $(DIST)/mhsaudio-app-* $(DIST)/mhsaudio-cli-* $(CDN)/ 2>/dev/null || true
 	@echo "staged for upload in $(CDN)/:"
 	@ls -1 $(CDN)
 	@echo ""

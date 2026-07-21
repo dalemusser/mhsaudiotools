@@ -13,7 +13,7 @@ First pick the right file for your computer — see **[DOWNLOAD.md](DOWNLOAD.md)
 
 ### macOS (Apple Silicon)
 
-1. Download `aigenaudio-app-macos-arm64.zip` and double-click to unzip.
+1. Download `mhsaudio-app-macos-arm64.zip` and double-click to unzip.
 2. Drag **MHS Audio Generator.app** into your **Applications** folder.
 3. The first time, **right-click the app → Open**, then click **Open** in the
    dialog. (Double-clicking the first time will be blocked because the app isn't
@@ -21,7 +21,7 @@ First pick the right file for your computer — see **[DOWNLOAD.md](DOWNLOAD.md)
 
 ### Windows (x64 or ARM)
 
-1. Download the matching `aigenaudio-app-windows-*.exe`.
+1. Download the matching `mhsaudio-app-windows-*.exe`.
 2. Double-click it. Windows SmartScreen may say "Windows protected your PC" —
    click **More info → Run anyway**.
 3. The app needs Microsoft's **WebView2 runtime**, which is already present on
@@ -30,14 +30,14 @@ First pick the right file for your computer — see **[DOWNLOAD.md](DOWNLOAD.md)
 
 ### Linux (x64 or ARM)
 
-1. Extract: `tar -xzf aigenaudio-app-linux-*.tar.gz`
-2. Make it runnable: `chmod +x aigenaudio`
+1. Extract: `tar -xzf mhsaudio-app-linux-*.tar.gz`
+2. Make it runnable: `chmod +x mhsaudio`
 3. Install the runtime libraries it needs (GTK3 + WebKitGTK):
    ```bash
    # Debian/Ubuntu
    sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0
    ```
-4. Run it: `./aigenaudio`
+4. Run it: `./mhsaudio`
 
 ---
 
@@ -49,26 +49,26 @@ The CLI is a single file. Put it somewhere on your `PATH` and make it executable
 
 ```bash
 # example for macOS Apple Silicon; use your platform's file
-chmod +x aigenaudio-cli-macos-arm64
-sudo mv aigenaudio-cli-macos-arm64 /usr/local/bin/aigenaudio
+chmod +x mhsaudio-cli-macos-arm64
+sudo mv mhsaudio-cli-macos-arm64 /usr/local/bin/mhsaudio
 
-aigenaudio --help
+mhsaudio --help
 ```
 
 On macOS, if you see *"cannot be opened because the developer cannot be verified"*,
 clear the quarantine flag once:
 
 ```bash
-xattr -d com.apple.quarantine /usr/local/bin/aigenaudio
+xattr -d com.apple.quarantine /usr/local/bin/mhsaudio
 ```
 
 ### Windows
 
-Put `aigenaudio-cli-windows-amd64.exe` (or `-arm64`) somewhere convenient, then run
+Put `mhsaudio-cli-windows-amd64.exe` (or `-arm64`) somewhere convenient, then run
 it from PowerShell or Command Prompt:
 
 ```powershell
-.\aigenaudio-cli-windows-amd64.exe --help
+.\mhsaudio-cli-windows-amd64.exe --help
 ```
 
 If SmartScreen blocks it, choose **More info → Run anyway**.

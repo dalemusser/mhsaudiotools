@@ -58,7 +58,7 @@ Both tools do the same thing: take **dialog**, apply your **voices**, and write
 ## The CLI
 
 ```
-aigenaudio <command> [flags]
+mhsaudio <command> [flags]
 
   account         show the account tier and its max parallelism
   voices          list the voices available on the account
@@ -72,28 +72,28 @@ The API key comes from `$ELEVENLABS_API_KEY`, `-key-file <path>`, or `~/.elevenl
 
 ```bash
 # Convert the team's CSV to a voices.json (preserves player-slot bindings on re-import)
-aigenaudio import-voices -csv VoiceAssignments.csv -out voices.json
+mhsaudio import-voices -csv VoiceAssignments.csv -out voices.json
 
 # Browse available voices to fill in / correct assignments
-aigenaudio voices -filter toppo
+mhsaudio voices -filter toppo
 ```
 
 ### Preview, then generate
 
 ```bash
 # Dry run — no API calls, nothing written. Always do this first on a new export.
-aigenaudio generate -in 2026-06-10-MHSDialogueExport.csv \
+mhsaudio generate -in 2026-06-10-MHSDialogueExport.csv \
   -voices voices.json -out ./audio -dry-run
 
 # Real run. Parallelism auto-detects the account's max; add -v for per-file logs.
-aigenaudio generate -in 2026-06-10-MHSDialogueExport.csv \
+mhsaudio generate -in 2026-06-10-MHSDialogueExport.csv \
   -voices voices.json -out ./audio
 ```
 
 A writer script needs a default voice:
 
 ```bash
-aigenaudio generate -in toppo-lessons.txt -voices voices.json \
+mhsaudio generate -in toppo-lessons.txt -voices voices.json \
   -out ./lessons -default-speaker Toppo -timestamps
 ```
 

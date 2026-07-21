@@ -10,7 +10,7 @@ There are **two tools**, both built from the same core:
 | | For whom | What it is |
 |---|---|---|
 | **MHS Audio Generator** (app) | Everyone — artists, writers, designers | A normal desktop app. Install it, click through three steps, get audio. No terminal, no Python. |
-| **`aigenaudio` (CLI)** | Technical users, automation | The same engine as a command-line tool, for scripting and batch runs. |
+| **`mhsaudio` (CLI)** | Technical users, automation | The same engine as a command-line tool, for scripting and batch runs. |
 
 Most people want the **app**.
 

@@ -29,7 +29,7 @@ make setup   # download the Tailwind standalone CLI (once per machine)
 make css     # compile frontend/tailwind.css -> frontend/src/app.css
 make watch   # recompile CSS on change
 make dev     # run with hot reload
-make build   # produce build/bin/aigenaudio.app
+make build   # produce build/bin/mhsaudio.app
 ```
 
 `frontend/src/app.css` is **committed** so the app builds without the Tailwind

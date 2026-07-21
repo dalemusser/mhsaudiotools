@@ -3,7 +3,7 @@
 All builds live on the **[Releases page](https://github.com/dalemusser/mhsaudiotools/releases/latest)**.
 Each release lists a file per platform for both the **app** and the **CLI**.
 
-Files are named `aigenaudio-<app|cli>-<platform>`. Pick your platform below.
+Files are named `mhsaudio-<app|cli>-<platform>`. Pick your platform below.
 
 ## Which computer do I have?
 
@@ -20,21 +20,21 @@ Files are named `aigenaudio-<app|cli>-<platform>`. Pick your platform below.
 
 | Platform | File |
 |---|---|
-| macOS (Apple Silicon) | `aigenaudio-app-macos-arm64.zip` |
-| Windows x64 | `aigenaudio-app-windows-amd64.exe` |
-| Windows ARM | `aigenaudio-app-windows-arm64.exe` |
-| Linux x64 | `aigenaudio-app-linux-amd64.tar.gz` |
-| Linux ARM | `aigenaudio-app-linux-arm64.tar.gz` |
+| macOS (Apple Silicon) | `mhsaudio-app-macos-arm64.zip` |
+| Windows x64 | `mhsaudio-app-windows-amd64.exe` |
+| Windows ARM | `mhsaudio-app-windows-arm64.exe` |
+| Linux x64 | `mhsaudio-app-linux-amd64.tar.gz` |
+| Linux ARM | `mhsaudio-app-linux-arm64.tar.gz` |
 
 ## The CLI (technical / automation)
 
 | Platform | File |
 |---|---|
-| macOS (Apple Silicon) | `aigenaudio-cli-macos-arm64` |
-| Windows x64 | `aigenaudio-cli-windows-amd64.exe` |
-| Windows ARM | `aigenaudio-cli-windows-arm64.exe` |
-| Linux x64 | `aigenaudio-cli-linux-amd64` |
-| Linux ARM | `aigenaudio-cli-linux-arm64` |
+| macOS (Apple Silicon) | `mhsaudio-cli-macos-arm64` |
+| Windows x64 | `mhsaudio-cli-windows-amd64.exe` |
+| Windows ARM | `mhsaudio-cli-windows-arm64.exe` |
+| Linux x64 | `mhsaudio-cli-linux-amd64` |
+| Linux ARM | `mhsaudio-cli-linux-arm64` |
 
 Next: **[INSTALL.md](INSTALL.md)** to set it up.
 

@@ -146,7 +146,7 @@ func TestRunDialogSystemLayoutAndFanOut(t *testing.T) {
 	}
 
 	want := []string{
-		".aigenaudio-manifest.json",
+		".mhsaudio-manifest.json",
 		"8_DANI_4.mp3",
 		"8_Toppo_2.mp3",
 		"Player1/8_Player_12.mp3",

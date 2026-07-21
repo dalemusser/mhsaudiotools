@@ -113,18 +113,18 @@ jobs:
       - name: Package
         run: |
           BIN=wails/build/bin
-          OUT="aigenaudio-app-${{ matrix.name }}"
+          OUT="mhsaudio-app-${{ matrix.name }}"
           case "${{ matrix.name }}" in
-            macos-*)   mv "$BIN/aigenaudio.app" "$BIN/MHS Audio Generator.app";
+            macos-*)   mv "$BIN/mhsaudio.app" "$BIN/MHS Audio Generator.app";
                        ditto -c -k --sequesterRsrc --keepParent "$BIN/MHS Audio Generator.app" "$OUT.zip";
                        echo "ASSET=$OUT.zip" >> "$GITHUB_ENV" ;;
-            linux-*)   tar -C "$BIN" -czf "$OUT.tar.gz" aigenaudio;                                 echo "ASSET=$OUT.tar.gz" >> "$GITHUB_ENV" ;;
-            windows-*) cp "$BIN/aigenaudio.exe" "$OUT.exe";                                         echo "ASSET=$OUT.exe" >> "$GITHUB_ENV" ;;
+            linux-*)   tar -C "$BIN" -czf "$OUT.tar.gz" mhsaudio;                                 echo "ASSET=$OUT.tar.gz" >> "$GITHUB_ENV" ;;
+            windows-*) cp "$BIN/mhsaudio.exe" "$OUT.exe";                                         echo "ASSET=$OUT.exe" >> "$GITHUB_ENV" ;;
           esac
 
       # macOS distribution: the app is self-signed here, so teammates get a
       # Gatekeeper warning. To ship without it, add an Apple Developer ID cert +
-      # notarization: import the cert as a secret, sign build/bin/aigenaudio.app,
+      # notarization: import the cert as a secret, sign build/bin/mhsaudio.app,
       # then `xcrun notarytool submit` the zip. Left as a TODO on purpose so
       # unsigned builds work today.
 
