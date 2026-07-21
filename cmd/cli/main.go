@@ -1,0 +1,55 @@
+// Command aigenaudio is a thin terminal shell over the aigenaudiotools engine.
+// It and the Wails app are both presentation layers; all behavior lives in
+// engine/.
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+const usage = `aigenaudio — generate game dialog audio with ElevenLabs
+
+Usage:
+  aigenaudio <command> [flags]
+
+Commands:
+  generate        Generate audio for a dialog source (use -dry-run to preview)
+  voices          List the voices available on the account
+  account         Show the account tier and its max concurrency
+  import-voices   Convert/merge a VoiceAssignments.csv into a voices.json config
+
+Run "aigenaudio <command> -h" for a command's flags.
+
+The API key is read from $ELEVENLABS_API_KEY, or -key-file, or ~/.elevenlabs_key.
+`
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+
+	var err error
+	switch os.Args[1] {
+	case "generate":
+		err = runGenerate(os.Args[2:])
+	case "voices":
+		err = runVoices(os.Args[2:])
+	case "account":
+		err = runAccount(os.Args[2:])
+	case "import-voices":
+		err = runImportVoices(os.Args[2:])
+	case "-h", "--help", "help":
+		fmt.Print(usage)
+		return
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", os.Args[1], usage)
+		os.Exit(2)
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>MHS Audio Generator</title>
+  <link href="/app.css" rel="stylesheet"/>
+</head>
+<body class="h-full bg-slate-900 text-slate-200 antialiased select-none">
+
+<!-- Title bar: draggable, inset so the macOS traffic lights have room. -->
+<header style="--wails-draggable:drag" class="h-12 flex items-center justify-between px-5 border-b border-slate-800">
+  <div class="pl-16 text-sm font-semibold tracking-wide text-slate-300">MHS Audio Generator</div>
+  <div id="account" class="text-xs text-slate-500">checking account…</div>
+</header>
+
+<main class="p-5 space-y-4 overflow-y-auto" style="height: calc(100% - 3rem)">
+
+  <!-- API key: only shown when none is configured. -->
+  <section id="key-card" class="hidden rounded-lg border border-amber-700/50 bg-amber-950/30 p-4">
+    <h2 class="text-sm font-semibold text-amber-300">ElevenLabs API key needed</h2>
+    <p class="mt-1 text-xs text-amber-200/70">Saved to <code>~/.elevenlabs_key</code>, readable only by you. You can also set <code>$ELEVENLABS_API_KEY</code>.</p>
+    <div class="mt-3 flex gap-2">
+      <input id="key-input" type="password" placeholder="Paste your API key" autocomplete="off"
+             class="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none select-text"/>
+      <button id="key-save" class="btn-primary">Save key</button>
+    </div>
+  </section>
+
+  <!-- Step 1: source -->
+  <section class="card">
+    <div class="card-head">
+      <span class="step">1</span>
+      <h2 class="card-title">Dialog source</h2>
+    </div>
+    <div class="flex items-center gap-3">
+      <button id="pick-source" class="btn">Choose file…</button>
+      <span id="source-path" class="path">No file chosen</span>
+    </div>
+    <div class="mt-3 flex items-center gap-2">
+      <label class="label" for="source-format">Format</label>
+      <select id="source-format" class="input-sm">
+        <option value="auto">Detect automatically</option>
+        <option value="dbexport">Dialogue System export (CSV)</option>
+        <option value="simplescript">Writer script (id: text)</option>
+      </select>
+    </div>
+  </section>
+
+  <!-- Step 2: voices -->
+  <section class="card">
+    <div class="card-head">
+      <span class="step">2</span>
+      <h2 class="card-title">Voices</h2>
+    </div>
+    <div class="flex items-center gap-3">
+      <button id="pick-voices" class="btn">Choose voices.json or CSV…</button>
+      <span id="voices-path" class="path">No file chosen</span>
+    </div>
+    <div id="voices-summary" class="hidden mt-4">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <h3 class="subhead">Characters</h3>
+          <ul id="voices-chars" class="mt-1 space-y-0.5 text-xs text-slate-400"></ul>
+        </div>
+        <div>
+          <h3 class="subhead">Player voice slots</h3>
+          <ul id="voices-slots" class="mt-1 space-y-0.5 text-xs text-slate-400"></ul>
+          <p class="mt-2 text-[11px] leading-snug text-slate-500">
+            Each slot keeps its voice, so re-generating never moves a voice to a
+            different <code>Player&lt;N&gt;</code> folder.
+          </p>
+        </div>
+      </div>
+      <div id="voices-problems" class="hidden mt-3 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200"></div>
+    </div>
+  </section>
+
+  <!-- Step 3: output + options -->
+  <section class="card">
+    <div class="card-head">
+      <span class="step">3</span>
+      <h2 class="card-title">Output</h2>
+    </div>
+    <div class="flex items-center gap-3">
+      <button id="pick-out" class="btn">Choose folder…</button>
+      <span id="out-path" class="path">No folder chosen</span>
+    </div>
+
+    <div class="mt-4 grid grid-cols-2 gap-x-6 gap-y-3">
+      <div class="flex items-center gap-2">
+        <label class="label" for="layout">Layout</label>
+        <select id="layout" class="input-sm">
+          <option value="dialog-system">Dialogue System (game)</option>
+          <option value="babylon-manifest">Babylon manifest</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="label" for="format">Audio</label>
+        <select id="format" class="input-sm">
+          <option value="mp3_44100_128">MP3 128 kbps</option>
+          <option value="mp3_44100_192">MP3 192 kbps</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="label" for="default-speaker">Default voice</label>
+        <input id="default-speaker" type="text" placeholder="e.g. Toppo" class="input-sm select-text"/>
+        <span class="hint" title="Character whose voice reads lines that have no speaker (writer scripts).">?</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="label" for="parallel">Parallel</label>
+        <input id="parallel" type="range" min="1" max="4" value="4" class="w-36 accent-sky-500"/>
+        <span id="parallel-val" class="text-xs text-slate-400">4</span>
+      </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap gap-x-6 gap-y-2">
+      <label class="check"><input id="cleanup" type="checkbox" checked/> Clean up text</label>
+      <label class="check"><input id="timestamps" type="checkbox"/> Word timings</label>
+      <label class="check"><input id="force" type="checkbox"/> Regenerate everything</label>
+    </div>
+  </section>
+
+  <!-- Actions -->
+  <div class="flex items-center gap-3">
+    <button id="preview" class="btn">Preview</button>
+    <button id="generate" class="btn-primary">Generate</button>
+    <button id="cancel" class="btn-danger hidden">Stop</button>
+    <span id="status" class="text-xs text-slate-500"></span>
+  </div>
+
+  <!-- Errors -->
+  <section id="error" class="hidden rounded-lg border border-red-800 bg-red-950/40 p-3 text-sm text-red-200"></section>
+
+  <!-- Preview -->
+  <section id="preview-card" class="hidden card">
+    <h2 class="card-title">Preview <span class="ml-2 text-xs font-normal text-slate-500">no API calls — nothing written</span></h2>
+    <div id="preview-stats" class="mt-3 grid grid-cols-4 gap-3"></div>
+    <div class="mt-4 grid grid-cols-2 gap-6">
+      <div>
+        <h3 class="subhead">Files per voice</h3>
+        <ul id="preview-voices" class="mt-1 space-y-0.5 text-xs text-slate-400"></ul>
+      </div>
+      <div>
+        <h3 class="subhead">Sample of what will be spoken</h3>
+        <ul id="preview-samples" class="mt-1 space-y-1 text-xs text-slate-400"></ul>
+      </div>
+    </div>
+    <div id="preview-problems" class="hidden mt-3 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200"></div>
+  </section>
+
+  <!-- Progress -->
+  <section id="progress-card" class="hidden card">
+    <h2 class="card-title">Generating…</h2>
+    <div class="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-700">
+      <div id="bar" class="h-full w-0 rounded-full bg-sky-500 transition-all duration-150"></div>
+    </div>
+    <div id="progress-text" class="mt-2 text-xs text-slate-400">starting…</div>
+  </section>
+
+  <!-- Result -->
+  <section id="result-card" class="hidden card">
+    <h2 class="card-title">Done</h2>
+    <div id="result-stats" class="mt-3 grid grid-cols-4 gap-3"></div>
+    <div class="mt-4 flex items-center gap-3">
+      <button id="reveal" class="btn">Open output folder</button>
+      <span id="result-note" class="text-xs text-slate-500"></span>
+    </div>
+    <div id="result-problems" class="hidden mt-3 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200"></div>
+  </section>
+
+</main>
+
+<script src="/main.js"></script>
+</body>
+</html>

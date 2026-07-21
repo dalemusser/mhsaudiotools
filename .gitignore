@@ -24,9 +24,19 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# Secrets — never commit API keys or env files
 .env
+secrets.env
+*.secret
+*.key
+.elevenlabs_key
+
+# macOS
+.DS_Store
 
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Build output
+dist/

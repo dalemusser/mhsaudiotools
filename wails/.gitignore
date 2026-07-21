@@ -1,0 +1,20 @@
+# Wails bin directory
+build/bin
+# Stray compiled binary from `go build` in this module dir (name == module dir)
+/wails
+
+# macOS
+.DS_Store
+# Wails Windows NSIS support files
+build/windows/installer/wails_tools.nsh
+build/windows/installer/tmp/
+
+# IDEs
+.idea
+.vscode
+
+# The black hole that is...
+node_modules
+
+# Tailwind standalone binary (downloaded via `make setup`)
+frontend/.tools/

@@ -1,0 +1,58 @@
+/* Tailwind source. Compiled to src/app.css by `make css` (see wails/Makefile).
+   src/app.css is committed so the app builds without the Tailwind binary. */
+@import "tailwindcss";
+
+/* Only scan markup — not the generated app.css next door, which would feed
+   Tailwind its own output. */
+@source "./src/**/*.html";
+@source "./src/**/*.js";
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-slate-800 bg-slate-800/40 p-4;
+  }
+  .card-head {
+    @apply mb-3 flex items-center gap-2;
+  }
+  .card-title {
+    @apply text-sm font-semibold text-slate-200;
+  }
+  .step {
+    @apply flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-[11px] font-bold text-slate-300;
+  }
+  .subhead {
+    @apply text-[11px] font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .btn {
+    @apply rounded-md border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200
+           hover:bg-slate-700 active:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply rounded-md bg-sky-600 px-4 py-1.5 text-xs font-semibold text-white
+           hover:bg-sky-500 active:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-danger {
+    @apply rounded-md bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600;
+  }
+
+  .label {
+    @apply w-24 shrink-0 text-xs text-slate-400;
+  }
+  .input-sm {
+    @apply rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-200
+           focus:border-sky-500 focus:outline-none;
+  }
+  .check {
+    @apply flex cursor-pointer items-center gap-2 text-xs text-slate-300;
+  }
+  .check input {
+    @apply h-3.5 w-3.5 accent-sky-500;
+  }
+  .path {
+    @apply truncate text-xs text-slate-500;
+  }
+  .hint {
+    @apply flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-slate-700 text-[10px] text-slate-400;
+  }
+}

@@ -1,0 +1,22 @@
+The program VoiceLineGenerator.py is to produce all voice lines held in the 'dialogue.csv' file using ElevenLabs, assuming the following conditions:
+
+In the folder that contains VoiceLineGenerator.py, there is a file 'VoiceAssignments.csv'
+In this file, starting from the second row, is voice assignments to all characters mentioned in dialogue.csv.
+The first column is Character.
+This column is used to identify each character in dialogue.csv.
+Each Non-playable character must have exactly one entry in VoiceAssignments.csv
+The character 'player' may have multiple voices, each assigned as a different entry with the 'Character' column containing the word 'Player'
+The second column is Voice ID.
+This column is used to select which voice will be used when generating voice lines.
+The third column is Voice Name.
+This column has nothing to do with the production of voices, but will instead determine the naming of the folder in which this character-voice combination will be stored.
+Each row must contain an entry for each of the first three columns.
+
+Another file that is to be contained in the folder is 'dialogue.csv'
+This file should contain all voice lines to be generated.
+It is assumed that all entries to be generated come three rows after a row containing one column titled 'DialogueEntries'
+The first column should contain the entry tag of each line.
+The entry tag is to be in the form #_#_# with the first # containing the conversation ID, the second containing the name of the character and the third containing the line ID
+The eighth column contains the text that should be generated and stored in a file with the name of the entry tag in that row.
+If a row contains the text 'START' in the sixth column, no voice line will be generated for this entry.
+
