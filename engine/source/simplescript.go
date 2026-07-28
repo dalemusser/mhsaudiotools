@@ -32,7 +32,7 @@ func (SimpleScript) Name() string { return "simplescript" }
 // first colon, then non-empty text). Sampling several lines avoids misfiring on
 // ordinary prose that happens to contain a colon.
 func (SimpleScript) Detect(sample []byte) bool {
-	sc := bufio.NewScanner(strings.NewReader(string(sample)))
+	sc := bufio.NewScanner(strings.NewReader(strings.TrimPrefix(string(sample), "\ufeff")))
 	checked, matched := 0, 0
 	for sc.Scan() && checked < detectScanLimit {
 		line := strings.TrimSpace(sc.Text())
@@ -67,11 +67,19 @@ func (SimpleScript) Parse(r io.Reader) ([]LineItem, error) {
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024) // tolerate long dialogue lines
 
 	var items []LineItem
-	seen := map[string]int{}
+	used := map[string]bool{} // every ID already taken (incl. literal "x_2" rows)
+	count := map[string]int{} // occurrences of each base ID
 	lineno := 0
 	for sc.Scan() {
 		lineno++
-		line := strings.TrimSpace(sc.Text())
+		line := sc.Text()
+		if lineno == 1 {
+			// Excel/Notepad save with a UTF-8 BOM; TrimSpace doesn't remove it,
+			// and it would otherwise become an invisible prefix on the first
+			// line's ID — a filename the game can never match.
+			line = strings.TrimPrefix(line, "\ufeff")
+		}
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
@@ -85,11 +93,14 @@ func (SimpleScript) Parse(r io.Reader) ([]LineItem, error) {
 			continue
 		}
 
-		seen[baseID]++
+		// Suffix duplicates until the name is genuinely free — "a, a, a_2"
+		// must not produce two files named a_2.
+		count[baseID]++
 		id := baseID
-		if n := seen[baseID]; n > 1 {
+		for n := count[baseID]; used[id]; n++ {
 			id = fmt.Sprintf("%s_%d", baseID, n)
 		}
+		used[id] = true
 
 		items = append(items, LineItem{
 			ID:   id,

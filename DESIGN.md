@@ -221,7 +221,17 @@ map to the same voice, even across audio regenerations. So:
 ## 7. Output layout
 
 Filenames are **dialog IDs, verbatim** — the Dialogue System matches audio to
-lines by ID, so IDs are never altered and idempotency keys on `ID + text-hash`.
+lines by ID, so IDs are never altered (IDs containing path separators or `..`
+are rejected at plan time — they'd nest, collide, or escape the output folder).
+Idempotency keys on `ID` + a manifest entry recording the **text hash, voice,
+model, format, and timings flag** — changing any of them regenerates the file.
+Legacy text-hash-only manifests still load, matching on text alone (and, for
+timings, on whether the sidecar is on disk), so upgrading doesn't re-pay for
+existing folders — the accepted tradeoff being that a voice recast made
+*before* the upgrade isn't detectable for those entries; a one-time `-force`
+clears that. The manifest is flushed periodically during
+a run and written atomically, so a crash mid-batch loses at most a few files'
+records; a corrupt manifest is a loud error, never a silent full regeneration.
 
 **`dialog-system`** (default) — what the game consumes directly, so no manual
 post‑processing (this automates what Dale did by hand before):
@@ -346,6 +356,8 @@ mhsaudio generate -in <source> -voices voices.json -out <dir> [-dry-run]
 
 `generate` flags: `-source` (auto|dbexport|simplescript), `-layout`, `-format`,
 `-timestamps`, `-concurrency` (0 = auto), `-force`, `-profile` / `-no-cleanup`,
+`-model` (v2|v3|full ID — default for voices that don't set one), `-emotion` /
+`-emotion-map` (v3 audio tags from the writers' directions),
 `-default-speaker` / `-default-voice` (for speaker‑less simplescript lines), `-v`.
 
 - **`-dry-run` needs no API key** and makes no calls (`job.Runner.Plan`). It
@@ -381,7 +393,7 @@ mhsaudio generate -in <source> -voices voices.json -out <dir> [-dry-run]
 Verified live: **every voice we use renders on v3**, accepts audio tags, and
 returns word timings. The only nuance is that v3 doesn't apply a professional
 clone's fine-tuning (`serves_pro_voices=false`), so the 5 pro-clone voices render
-at base quality on v3 — a listen-and-decide per voice (see `docs/voice-versions.html`).
+at base quality on v3 — a listen-and-decide per voice (see `docs/voice-versions-status.html`).
 So model is a **per-voice choice**, not a global switch.
 
 The engine supports it:
@@ -407,7 +419,12 @@ The **tag-map editor** is built too: add/edit direction→tag rows, an ignore li
 and a test box showing what a line becomes on v3 — plus the same load/save/"use
 defaults"/"save defaults" controls as cleanup. The emotion UI is complete.
 
-Still to build: CLI flags (`-model`, `-emotion`) so the terminal path matches the app.
+**CLI (built):** the terminal path matches the app — `-model` sets the default
+model (v2/v3 shorthand or a full ID; per-voice models in the voices file still
+win), `-emotion` applies the built-in tag map, `-emotion-map` loads a custom one
+(and implies `-emotion`, mirroring `-profile`). The run header reports the
+v2/v3 voice mix and warns when `-emotion` is set but no voice renders on v3;
+the dry-run's files-per-voice breakdown shows each voice's model.
 
 ---
 

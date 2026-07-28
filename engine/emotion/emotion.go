@@ -16,14 +16,26 @@ var parenRe = regexp.MustCompile(`\(([^()]*)\)`)
 // Extract pulls parenthetical stage directions out of a line, returning the text
 // with them removed and the list of direction phrases (inner text, trimmed). It
 // leaves everything else untouched — cleanup runs on the returned text.
+//
+// Nested parentheticals like "(angry (very))" are peeled inside-out over
+// several passes, so no "(angry " fragment survives into the spoken text.
+// Unbalanced parens are left alone on purpose: they stay visible in a preview
+// instead of silently eating dialogue.
 func Extract(text string) (clean string, directions []string) {
-	for _, m := range parenRe.FindAllStringSubmatch(text, -1) {
-		if d := strings.TrimSpace(m[1]); d != "" {
-			directions = append(directions, d)
+	const maxDepth = 4 // writers don't nest deeper; guards against pathological input
+	for range maxDepth {
+		ms := parenRe.FindAllStringSubmatch(text, -1)
+		if ms == nil {
+			break
 		}
+		for _, m := range ms {
+			if d := strings.TrimSpace(m[1]); d != "" {
+				directions = append(directions, d)
+			}
+		}
+		text = parenRe.ReplaceAllString(text, " ")
 	}
-	clean = parenRe.ReplaceAllString(text, " ")
-	return strings.TrimSpace(spaceRe.ReplaceAllString(clean, " ")), directions
+	return strings.TrimSpace(spaceRe.ReplaceAllString(text, " ")), directions
 }
 
 var spaceRe = regexp.MustCompile(`\s+`)
@@ -39,7 +51,10 @@ type Map struct {
 }
 
 func normalize(s string) string {
-	return strings.ToLower(strings.TrimSpace(s))
+	// Collapse runs of whitespace too: peeling a nested parenthetical leaves a
+	// doubled space behind ("angry  shout"), and that must still match the
+	// map's "angry shout" entry.
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
 
 // TagsFor maps direction phrases to audio tags, in order, skipping unknown and

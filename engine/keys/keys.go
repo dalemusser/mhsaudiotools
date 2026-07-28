@@ -28,21 +28,29 @@ func HomePath() (string, error) {
 
 // Resolve looks for the key in the environment first, then in each extra file
 // given (in order), then in ~/.elevenlabs_key.
+//
+// An extra file was named explicitly (e.g. -key-file), so failing to read a key
+// from it is a loud error — silently falling through to the home file could
+// spend a different account's credits.
 func Resolve(extraFiles ...string) (string, error) {
 	if k := strings.TrimSpace(os.Getenv(EnvVar)); k != "" {
 		return k, nil
 	}
-	candidates := make([]string, 0, len(extraFiles)+1)
 	for _, f := range extraFiles {
-		if f != "" {
-			candidates = append(candidates, f)
+		if f == "" {
+			continue
 		}
+		k, err := ReadFile(f)
+		if err != nil {
+			return "", fmt.Errorf("key file %s: %w", f, err)
+		}
+		if k == "" {
+			return "", fmt.Errorf("key file %s: contains an empty key", f)
+		}
+		return k, nil
 	}
 	if home, err := HomePath(); err == nil {
-		candidates = append(candidates, home)
-	}
-	for _, path := range candidates {
-		if k, err := ReadFile(path); err == nil && k != "" {
+		if k, err := ReadFile(home); err == nil && k != "" {
 			return k, nil
 		}
 	}

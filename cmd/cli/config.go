@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dalemusser/mhsaudiotools/engine/emotion"
 	"github.com/dalemusser/mhsaudiotools/engine/keys"
 	"github.com/dalemusser/mhsaudiotools/engine/source"
+	"github.com/dalemusser/mhsaudiotools/engine/synth"
 	"github.com/dalemusser/mhsaudiotools/engine/text"
 	"github.com/dalemusser/mhsaudiotools/engine/voice"
 )
@@ -70,6 +72,52 @@ func loadProfile(path string, disabled bool) (*text.Profile, error) {
 		return text.MHSProfile(), nil
 	}
 	return text.LoadProfile(path)
+}
+
+// loadEmotionMap returns the emotion tag map: nil (off), a file, or the built-in
+// MHS one. A -emotion-map path implies -emotion, mirroring -profile.
+func loadEmotionMap(path string, enabled bool) (*emotion.Map, error) {
+	if path != "" {
+		return emotion.LoadMap(path)
+	}
+	if enabled {
+		return emotion.DefaultMap(), nil
+	}
+	return nil, nil
+}
+
+// resolveModel maps the -model shorthand to full ElevenLabs model IDs; anything
+// else passes through (trimmed) so new models work without a CLI release.
+func resolveModel(s string) string {
+	s = strings.TrimSpace(s)
+	switch strings.ToLower(s) {
+	case "":
+		return ""
+	case "v2":
+		return synth.ModelV2
+	case "v3":
+		return synth.ModelV3
+	}
+	return s
+}
+
+// modelShort renders a model ID the way people say it (v2/v3); unknown IDs show
+// in full.
+func modelShort(id string) string {
+	switch id {
+	case synth.ModelV2:
+		return "v2"
+	case synth.ModelV3:
+		return "v3"
+	}
+	return id
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // commas formats n as 1,234,567 — these counts get large enough to misread.

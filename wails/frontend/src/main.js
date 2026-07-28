@@ -78,23 +78,27 @@ async function init() {
   }
 }
 
-// loadAccount drives the parallel slider: its max is whatever the account allows.
+// renderAccount drives the header and the parallel slider: its max is whatever
+// the account allows.
+function renderAccount(a) {
+  state.maxParallel = a.maxConcurrency;
+
+  const slider = $("parallel");
+  slider.max = String(a.maxConcurrency);
+  slider.value = String(a.maxConcurrency); // default to the account's max — speed is the point
+  updateParallelLabel();
+
+  const used = a.characterLimit > 0 ? ` (${Math.round((a.characterCount / a.characterLimit) * 100)}%)` : "";
+  $("account").textContent =
+    `${a.tier} · up to ${a.maxConcurrency} parallel · ${commas(a.characterCount)}/${commas(a.characterLimit)} chars${used}`;
+  if (!a.tierKnown) {
+    $("account").textContent += " · tier unrecognized";
+  }
+}
+
 async function loadAccount() {
   try {
-    const a = await app().GetAccount();
-    state.maxParallel = a.maxConcurrency;
-
-    const slider = $("parallel");
-    slider.max = String(a.maxConcurrency);
-    slider.value = String(a.maxConcurrency); // default to the account's max — speed is the point
-    updateParallelLabel();
-
-    const used = Math.round((a.characterCount / a.characterLimit) * 100);
-    $("account").textContent =
-      `${a.tier} · up to ${a.maxConcurrency} parallel · ${commas(a.characterCount)}/${commas(a.characterLimit)} chars (${used}%)`;
-    if (!a.tierKnown) {
-      $("account").textContent += " · tier unrecognized";
-    }
+    renderAccount(await app().GetAccount());
   } catch (e) {
     $("account").textContent = "account unavailable";
   }
@@ -189,14 +193,38 @@ $("parallel").oninput = updateParallelLabel;
 $("key-save").onclick = async () => {
   const key = $("key-input").value.trim();
   if (!key) return;
+  $("key-save").disabled = true;
   try {
     const path = await app().SaveKey(key);
+    // Prove the key actually works before hiding the card — a mistyped key
+    // that only fails at Generate time is a miserable way to find out. The
+    // failure could equally be a network blip, so say so; the key IS saved
+    // and retrying costs nothing.
+    let account;
+    try {
+      account = await app().GetAccount();
+    } catch (e) {
+      showError(`key saved to ${path}, but it couldn't be verified with ElevenLabs — ` +
+        `a mistyped key or a network problem (${String(e?.message || e)})`);
+      return;
+    }
     $("key-card").classList.add("hidden");
     setStatus(`key saved to ${path}`);
-    await loadAccount();
+    renderAccount(account);
   } catch (e) {
     showError(e);
+  } finally {
+    $("key-save").disabled = false;
   }
+};
+
+// The escape hatch for a revoked or mistyped stored key: GetSettings only says
+// "a key exists", so without this there'd be no way back to the key card short
+// of deleting ~/.elevenlabs_key by hand.
+$("key-change").onclick = () => {
+  $("key-card").classList.remove("hidden");
+  $("key-input").value = "";
+  $("key-input").focus();
 };
 
 // --- request ----------------------------------------------------------------
@@ -305,16 +333,29 @@ $("save-default-emotion").onclick = async () => {
 
 // --- preview ----------------------------------------------------------------
 
+// previewSeq goes stale when another preview starts or a run begins, so a slow
+// Plan can't pop its card over the progress view or wipe fresh results.
+let previewSeq = 0;
+
 $("preview").onclick = async () => {
+  if (state.running) return;
   clearError();
+  const seq = ++previewSeq;
+  $("preview").disabled = true;
   setStatus("planning…");
   try {
     const p = await app().Preview(request());
+    if (seq !== previewSeq || state.running) return; // superseded — drop it
     renderPreview(p);
     setStatus("");
   } catch (e) {
+    if (seq !== previewSeq || state.running) return;
     setStatus("");
     showError(e);
+  } finally {
+    // Only the newest preview may re-enable: a stale one settling here while a
+    // fresh one is still in flight must not reopen the door to a third.
+    if (seq === previewSeq && !state.running) $("preview").disabled = false;
   }
 };
 
@@ -362,6 +403,7 @@ window.runtime.EventsOn("progress", (p) => {
 
 $("generate").onclick = async () => {
   clearError();
+  previewSeq++; // any preview still in flight is now stale
   setRunning(true);
   $("progress-card").classList.remove("hidden");
   $("result-card").classList.add("hidden");
@@ -382,7 +424,11 @@ $("generate").onclick = async () => {
 
 $("cancel").onclick = async () => {
   setStatus("stopping…");
-  await app().Cancel();
+  try {
+    await app().Cancel();
+  } catch (e) {
+    showError(e);
+  }
 };
 
 function setRunning(on) {
@@ -708,6 +754,7 @@ function ceError(msg) {
 
 async function openCleanupEditor() {
   ceError("");
+  ceTestSeq++; // a test call pending across close→reopen must not render
   $("ce-status").textContent = "";
   $("ce-suggestions").innerHTML = "";
   $("ce-test-out").textContent = "";
@@ -752,17 +799,24 @@ $("ce-rules").addEventListener("click", (e) => {
   ceRender(rules);
 });
 
-// Live test: apply the current rules to the sample line.
+// Live test: apply the current rules to the sample line. One un-sequenced call
+// fires per keystroke, so only the latest result may render — an earlier slow
+// call must not overwrite a later one.
+let ceTestSeq = 0;
 $("ce-test-in").oninput = async () => {
   const sample = $("ce-test-in").value;
+  const seq = ++ceTestSeq;
   if (!sample) {
     $("ce-test-out").textContent = "";
     return;
   }
   try {
-    $("ce-test-out").textContent = await app().TestCleanup(ceScrapeRules(), sample);
+    const out = await app().TestCleanup(ceScrapeRules(), sample);
+    if (seq !== ceTestSeq) return;
+    $("ce-test-out").textContent = out;
     $("ce-test-out").classList.remove("text-red-300");
   } catch (e) {
+    if (seq !== ceTestSeq) return;
     $("ce-test-out").textContent = String(e?.message || e);
     $("ce-test-out").classList.add("text-red-300");
   }
@@ -864,6 +918,7 @@ function emDTO() {
 
 async function openEmotionEditor() {
   emError("");
+  emTestSeq++; // a test call pending across close→reopen must not render
   $("em-status").textContent = "";
   $("em-test-out").textContent = "";
   try {
@@ -901,27 +956,48 @@ $("em-rules").addEventListener("click", (e) => {
   emRender(rules);
 });
 
+let emTestSeq = 0;
 $("em-test-in").oninput = async () => {
   const sample = $("em-test-in").value;
+  const seq = ++emTestSeq;
   if (!sample) {
     $("em-test-out").textContent = "";
     return;
   }
   try {
-    $("em-test-out").textContent = await app().TestEmotion(emDTO(), sample);
+    const out = await app().TestEmotion(emDTO(), sample);
+    if (seq !== emTestSeq) return;
+    $("em-test-out").textContent = out;
   } catch (e) {
+    if (seq !== emTestSeq) return;
     $("em-test-out").textContent = String(e?.message || e);
   }
 };
 
 $("em-save").onclick = async () => {
   emError("");
+  // Incomplete rows are dropped and duplicate phrases collapse last-wins on
+  // save (the map is keyed by phrase) — say so, like the voice editor does,
+  // instead of letting edits vanish silently.
+  const rows = emScrapeRules();
+  const kept = rows.filter((r) => r.phrase.trim() && r.tag.trim());
+  const seen = new Set();
+  let dups = 0;
+  for (const r of kept) {
+    const k = r.phrase.trim().toLowerCase();
+    if (seen.has(k)) dups++;
+    seen.add(k);
+  }
+  const dropped = rows.length - kept.length;
   try {
     const info = await app().SaveEmotion(state.emotionPath, emDTO());
     if (!info) return;
     renderEmotion(info);
     closeEmotionEditor();
-    setStatus("emotion tags saved");
+    const notes = [];
+    if (dropped) notes.push(`${dropped} incomplete row(s) skipped`);
+    if (dups) notes.push(`${dups} duplicate phrase(s) collapsed`);
+    setStatus(notes.length ? `emotion tags saved (${notes.join(", ")})` : "emotion tags saved");
   } catch (e) {
     emError(String(e?.message || e));
   }

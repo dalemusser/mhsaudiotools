@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/dalemusser/mhsaudiotools/engine/emotion"
 	"github.com/dalemusser/mhsaudiotools/engine/output"
@@ -27,9 +27,13 @@ import (
 	"github.com/dalemusser/mhsaudiotools/engine/voice"
 )
 
-// manifestName records each written file's text hash, enabling idempotent
-// re-runs (regenerate only what changed).
+// manifestName records what each written file was generated from, enabling
+// idempotent re-runs (regenerate only what changed).
 const manifestName = ".mhsaudio-manifest.json"
+
+// manifestFlushEvery is how many written files trigger an incremental manifest
+// save during a run, bounding what a crash can lose to a handful of files.
+const manifestFlushEvery = 25
 
 // Options configures a generation run.
 type Options struct {
@@ -108,7 +112,7 @@ type unit struct {
 	voiceID string
 	model   string
 	text    string
-	hash    string
+	ent     entry
 }
 
 // PlanItem is one audio file a run would produce.
@@ -193,7 +197,7 @@ func (r *Runner) Run(ctx context.Context, lines []source.LineItem) (*Result, err
 			voiceID: it.VoiceID,
 			model:   it.Model,
 			text:    it.Text,
-			hash:    hashText(it.Text),
+			ent:     r.entryFor(it.VoiceID, it.Model, it.Text),
 		})
 	}
 
@@ -218,6 +222,14 @@ func (r *Runner) planWith(lines []source.LineItem, man *manifest) *PlanResult {
 	p := &PlanResult{Lines: len(lines)}
 
 	for _, li := range lines {
+		// IDs become filenames verbatim; refuse ones that would nest, collide,
+		// or escape the output folder.
+		if err := checkID(li.ID); err != nil {
+			p.Errors = append(p.Errors, LineError{LineID: li.ID, Err: err})
+			p.Failed++
+			continue
+		}
+
 		// Pull the writers' directions out first (so cleanup doesn't eat them),
 		// then clean the remaining text. Directions come from inline parentheticals
 		// and the source's structured Direction field.
@@ -258,6 +270,13 @@ func (r *Runner) planWith(lines []source.LineItem, man *manifest) *PlanResult {
 		}
 
 		for _, tg := range targets {
+			// Layouts splice in more than the ID (Babylon uses the speaker as a
+			// folder), so vet the full path they built, not just the ID.
+			if err := checkRelPath(tg.RelPath); err != nil {
+				p.Errors = append(p.Errors, LineError{LineID: li.ID, RelPath: tg.RelPath, Err: err})
+				p.Failed++
+				continue
+			}
 			p.Targets++
 			// Text and model are per-target: only v3 voices get the emotion tags.
 			model := r.modelFor(tg.Model)
@@ -265,7 +284,6 @@ func (r *Runner) planWith(lines []source.LineItem, man *manifest) *PlanResult {
 			if r.Emotion != nil && model == synth.ModelV3 {
 				text = r.Emotion.Apply(base, directions)
 			}
-			hash := hashText(text)
 			item := PlanItem{
 				LineID:    li.ID,
 				RelPath:   tg.RelPath,
@@ -274,17 +292,81 @@ func (r *Runner) planWith(lines []source.LineItem, man *manifest) *PlanResult {
 				Model:     model,
 				Text:      text,
 			}
-			if !r.Options.Force && man.upToDate(r.Options.OutputDir, tg.RelPath, hash) {
+			if !r.Options.Force && man.upToDate(r.Options.OutputDir, tg.RelPath, r.entryFor(tg.VoiceID, model, text)) {
 				item.UpToDate = true
 				p.UpToDate++
 			} else {
 				p.ToGenerate++
-				p.Characters += len(text)
+				p.Characters += utf8.RuneCountInString(text)
 			}
 			p.Items = append(p.Items, item)
 		}
 	}
 	return p
+}
+
+// checkID rejects line IDs that can't be used as filenames — IDs become
+// filenames verbatim, so a bad one nests, collides, escapes the output folder,
+// or breaks on Windows.
+func checkID(id string) error {
+	if err := checkFilename(id); err != nil {
+		return fmt.Errorf("line ID %v", err)
+	}
+	return nil
+}
+
+// checkRelPath vets a layout-built output path: every segment must be a plain,
+// portable filename.
+func checkRelPath(rel string) error {
+	for _, seg := range strings.Split(rel, "/") {
+		if err := checkFilename(seg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkFilename rejects names that misbehave on some supported OS: path
+// separators (nest or collide silently), dot navigation (escapes the output
+// folder), NTFS drive/stream colons, and Windows reserved device names or
+// trailing dots/spaces.
+func checkFilename(name string) error {
+	if name == "" || name == "." || name == ".." {
+		return fmt.Errorf("%q is not a usable filename", name)
+	}
+	if strings.ContainsAny(name, `/\:`) {
+		return fmt.Errorf("%q contains a path separator or colon", name)
+	}
+	if strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+		return fmt.Errorf("%q ends with a dot or space (breaks on Windows)", name)
+	}
+	base := strings.ToUpper(name)
+	if i := strings.IndexByte(base, '.'); i >= 0 {
+		base = base[:i]
+	}
+	switch base {
+	case "CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+		return fmt.Errorf("%q is a reserved Windows device name", name)
+	}
+	return nil
+}
+
+// entryFor captures everything that determines a target's rendered content; if
+// any of it changes on a later run, the file regenerates.
+func (r *Runner) entryFor(voiceID, model, text string) entry {
+	f := string(r.Options.Format)
+	if f == "" {
+		f = string(synth.MP3_44100_128)
+	}
+	return entry{
+		Text:   hashText(text),
+		Voice:  voiceID,
+		Model:  model,
+		Format: f,
+		Words:  r.Options.WithTimestamps,
+	}
 }
 
 // modelFor resolves a target's model: the voice's own, else the run default,
@@ -312,13 +394,37 @@ func (r *Runner) execute(ctx context.Context, units []unit, man *manifest, res *
 		conc = total
 	}
 
+	// One mutex serializes counters, error collection, and progress reporting,
+	// so every Progress snapshot is consistent and Done never goes backwards.
 	var (
-		mu           sync.Mutex // guards res.Errors
-		done, failed int64
-		written      int64
+		mu           sync.Mutex
+		done, failed int
+		written      int
 		ch           = make(chan unit)
 		wg           sync.WaitGroup
 	)
+	finish := func(u unit, wroteWords bool, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		done++
+		if err != nil {
+			failed++
+			res.Errors = append(res.Errors, LineError{LineID: u.lineID, RelPath: u.relPath, Err: err})
+		} else {
+			written++
+			// Record only what actually landed: a zero-word response writes no
+			// sidecar, and the entry must not claim one.
+			u.ent.Words = u.ent.Words && wroteWords
+			man.set(u.relPath, u.ent)
+			// Flush periodically so a crash or kill mid-batch doesn't lose the
+			// record of audio already paid for. Best-effort — the save on the
+			// way out of Run is authoritative.
+			if written%manifestFlushEvery == 0 {
+				_ = man.save(r.Options.OutputDir)
+			}
+		}
+		r.report(Progress{Total: total, Done: done, Failed: failed})
+	}
 
 	for i := 0; i < conc; i++ {
 		wg.Add(1)
@@ -328,21 +434,8 @@ func (r *Runner) execute(ctx context.Context, units []unit, man *manifest, res *
 				if ctx.Err() != nil {
 					return
 				}
-				err := r.renderOne(ctx, u)
-				if err != nil {
-					atomic.AddInt64(&failed, 1)
-					mu.Lock()
-					res.Errors = append(res.Errors, LineError{LineID: u.lineID, RelPath: u.relPath, Err: err})
-					mu.Unlock()
-				} else {
-					atomic.AddInt64(&written, 1)
-					man.set(u.relPath, u.hash)
-				}
-				r.report(Progress{
-					Total:  total,
-					Done:   int(atomic.AddInt64(&done, 1)),
-					Failed: int(atomic.LoadInt64(&failed)),
-				})
+				wroteWords, err := r.renderOne(ctx, u)
+				finish(u, wroteWords, err)
 			}
 		}()
 	}
@@ -360,8 +453,10 @@ func (r *Runner) execute(ctx context.Context, units []unit, man *manifest, res *
 
 	wg.Wait()
 
-	res.Written = int(atomic.LoadInt64(&written))
-	res.Failed += int(atomic.LoadInt64(&failed))
+	mu.Lock()
+	res.Written = written
+	res.Failed += failed
+	mu.Unlock()
 	return ctx.Err()
 }
 
@@ -386,8 +481,16 @@ func (r *Runner) concurrency(ctx context.Context) int {
 }
 
 // renderOne synthesizes a single unit and writes it (plus word timings, when
-// requested) to disk.
-func (r *Runner) renderOne(ctx context.Context, u unit) error {
+// requested) to disk. It reports whether a timings sidecar was written.
+func (r *Runner) renderOne(ctx context.Context, u unit) (wroteWords bool, err error) {
+	// Defense in depth behind the plan-time checks — and strictly BEFORE the
+	// paid API call, so a hostile path can never cost money on every re-run.
+	base := filepath.Clean(r.Options.OutputDir)
+	full := filepath.Join(base, filepath.FromSlash(u.relPath))
+	if rel, err := filepath.Rel(base, full); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return false, fmt.Errorf("output path %q escapes the output folder", u.relPath)
+	}
+
 	out, err := r.Client.Synthesize(ctx, synth.Request{
 		VoiceID:        u.voiceID,
 		Text:           u.text,
@@ -396,22 +499,22 @@ func (r *Runner) renderOne(ctx context.Context, u unit) error {
 		WithTimestamps: r.Options.WithTimestamps,
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	full := filepath.Join(r.Options.OutputDir, filepath.FromSlash(u.relPath))
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		return err
+		return false, err
 	}
 	if err := os.WriteFile(full, out.Audio, 0o644); err != nil {
-		return err
+		return false, err
 	}
 	if r.Options.WithTimestamps && len(out.Words) > 0 {
 		if err := writeTimings(full, out.Words); err != nil {
-			return err
+			return false, err
 		}
+		wroteWords = true
 	}
-	return nil
+	return wroteWords, nil
 }
 
 func (r *Runner) report(p Progress) {
@@ -466,17 +569,50 @@ func extForFormat(f synth.AudioFormat) string {
 
 // --- manifest ----------------------------------------------------------------
 
-// manifest maps an output-relative path to the hash of the text it was
-// generated from, so a re-run regenerates only changed or missing files.
+// manifest records, per output-relative path, everything its audio was
+// generated from, so a re-run regenerates only what changed. v1 manifests
+// stored a bare text-hash string per file; entry.UnmarshalJSON still accepts
+// that, with the missing fields acting as wildcards, so upgrading doesn't
+// regenerate (re-pay for) existing output folders.
 type manifest struct {
-	Files map[string]string `json:"files"`
+	Files map[string]entry `json:"files"`
 
 	mu sync.Mutex
 }
 
+// entry is one file's generation record.
+type entry struct {
+	Text   string `json:"text"`             // hash of the exact text sent
+	Voice  string `json:"voice,omitempty"`  // ElevenLabs voice ID
+	Model  string `json:"model,omitempty"`  // ElevenLabs model ID
+	Format string `json:"format,omitempty"` // output_format
+	Words  bool   `json:"words,omitempty"`  // word-timings sidecar written
+}
+
+// UnmarshalJSON accepts both the current object form and the legacy v1 bare
+// text-hash string.
+func (e *entry) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		*e = entry{Text: s}
+		return nil
+	}
+	type plain entry
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	*e = entry(p)
+	return nil
+}
+
 func loadManifest(dir string) (*manifest, error) {
-	m := &manifest{Files: map[string]string{}}
-	data, err := os.ReadFile(filepath.Join(dir, manifestName))
+	m := &manifest{Files: map[string]entry{}}
+	path := filepath.Join(dir, manifestName)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return m, nil
@@ -484,34 +620,57 @@ func loadManifest(dir string) (*manifest, error) {
 		return nil, err
 	}
 	if err := json.Unmarshal(data, m); err != nil {
-		// A corrupt manifest shouldn't fail the run — rebuild it instead.
-		return &manifest{Files: map[string]string{}}, nil
+		// Silently rebuilding would re-pay for the whole batch — fail loudly
+		// and let the user delete the file on purpose.
+		return nil, fmt.Errorf("%s is corrupt (%v); delete it to rebuild from scratch (regenerates everything)", path, err)
 	}
 	if m.Files == nil {
-		m.Files = map[string]string{}
+		m.Files = map[string]entry{}
 	}
 	return m, nil
 }
 
-// upToDate reports whether rel was generated from this exact text and is still
-// on disk.
-func (m *manifest) upToDate(dir, rel, hash string) bool {
+// upToDate reports whether rel is on disk and was generated from this exact
+// text, voice, model, and format. Fields empty in the recorded entry (legacy
+// v1 manifests) match anything. When timings are requested, the sidecar itself
+// must be on disk — that's what grandfathers legacy runs that already produced
+// sidecars, regenerates entries whose sidecar was deleted, and forces a
+// regenerate when timings are newly requested.
+func (m *manifest) upToDate(dir, rel string, want entry) bool {
 	m.mu.Lock()
-	recorded := m.Files[rel]
+	rec, ok := m.Files[rel]
 	m.mu.Unlock()
-	if recorded != hash {
+	if !ok || rec.Text != want.Text {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel)))
+	if rec.Voice != "" && rec.Voice != want.Voice {
+		return false
+	}
+	if rec.Model != "" && rec.Model != want.Model {
+		return false
+	}
+	if rec.Format != "" && rec.Format != want.Format {
+		return false
+	}
+	full := filepath.Join(dir, filepath.FromSlash(rel))
+	if want.Words {
+		base := strings.TrimSuffix(full, filepath.Ext(full))
+		if _, err := os.Stat(base + ".words.json"); err != nil {
+			return false
+		}
+	}
+	_, err := os.Stat(full)
 	return err == nil
 }
 
-func (m *manifest) set(rel, hash string) {
+func (m *manifest) set(rel string, e entry) {
 	m.mu.Lock()
-	m.Files[rel] = hash
+	m.Files[rel] = e
 	m.mu.Unlock()
 }
 
+// save writes atomically (temp + rename) so a crash mid-write can't leave a
+// truncated manifest that would then fail to load.
 func (m *manifest) save(dir string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -522,5 +681,22 @@ func (m *manifest) save(dir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, manifestName), append(data, '\n'), 0o644)
+	path := filepath.Join(dir, manifestName)
+	// A unique temp name so two processes generating into one folder (CLI and
+	// app at once) can't interleave writes and rename a torn file into place.
+	tmp, err := os.CreateTemp(dir, manifestName+".tmp-*")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	_ = os.Chmod(tmp.Name(), 0o644)
+	return os.Rename(tmp.Name(), path)
 }

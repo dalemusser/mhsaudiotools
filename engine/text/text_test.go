@@ -3,6 +3,7 @@ package text
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -159,5 +160,37 @@ func TestLoadProfileRejectsBadRegex(t *testing.T) {
 	}
 	if _, err := LoadProfile(path); err == nil {
 		t.Error("expected LoadProfile to reject an invalid regex up front")
+	}
+}
+
+// One profile may be applied from several goroutines at once (app preview
+// concurrent with a run); the regex compile caches must be race-free.
+func TestProfileApplyConcurrent(t *testing.T) {
+	p := &Profile{Name: "t", Rules: []Rule{
+		{Kind: RuleRegex, Op: OpRemove, From: `\[em\d\]`},
+		{Kind: RuleLiteral, Op: OpReplace, From: "WAT247", To: "Watt 2 4 7"},
+	}}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				if _, err := p.Apply("[em1] WAT247 hello"); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// An empty "from" would make a replace insert its text between every character
+// of every line — Validate must refuse it before it can reach a paid run.
+func TestValidateRejectsEmptyFrom(t *testing.T) {
+	p := &Profile{Name: "bad", Rules: []Rule{{Kind: RuleLiteral, Op: OpReplace, From: "", To: "x"}}}
+	if err := p.Validate(); err == nil {
+		t.Fatal("empty-from rule passed validation")
 	}
 }

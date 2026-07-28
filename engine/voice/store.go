@@ -40,6 +40,10 @@ func (c *Config) Save(path string) error {
 //
 // Rules:
 //   - Character assignments are replaced wholesale; they aren't position-sensitive.
+//     But a character keeping the same voice also keeps its Model (v2/v3) choice —
+//     the CSV has no model column, and losing a by-ear per-voice decision to a
+//     routine re-import would be silent data loss. A character whose voice
+//     changed gets a fresh (empty) model: a new voice needs a new by-ear call.
 //   - A player voice already pinned to a slot KEEPS that slot number, whatever
 //     row it now occupies in the CSV (its display name is refreshed).
 //   - A player voice not seen before is assigned the lowest free slot number.
@@ -53,7 +57,20 @@ func (c *Config) MergeFrom(imported *Config) (added []Slot) {
 	if imported == nil {
 		return nil
 	}
+	prev := c.Assignments
 	c.Assignments = imported.Assignments
+	for i := range c.Assignments {
+		a := &c.Assignments[i]
+		if a.Model != "" {
+			continue // the import carried its own choice
+		}
+		for _, old := range prev {
+			if strings.EqualFold(old.Character, a.Character) && old.VoiceID == a.VoiceID {
+				a.Model = old.Model
+				break
+			}
+		}
+	}
 
 	pinned := make(map[string]int, len(c.PlayerSlots)) // voiceID -> slot index
 	used := make(map[int]bool, len(c.PlayerSlots))

@@ -73,3 +73,21 @@ func TestSpeakerFromTag(t *testing.T) {
 		}
 	}
 }
+
+// Duplicate entry tags are export corruption: two workers would race on one
+// file and the manifest hash could describe the loser's text. Fail loudly.
+func TestDBExportRejectsDuplicateTags(t *testing.T) {
+	data := strings.Join([]string{
+		"Database",
+		"DialogueEntries",
+		"entrytag,ConvID,ID,Actor,Conversant,Title,MenuText,DialogueText,IsGroup",
+		",,,,,,,,",
+		"8_Toppo_2,8,2,1,,,,Hello.,",
+		"8_Toppo_2,8,3,1,,,,Different text.,",
+		"OutgoingLinks",
+	}, "\n")
+	_, err := DBExport{}.Parse(strings.NewReader(data))
+	if err == nil || !strings.Contains(err.Error(), "duplicate entry tags") {
+		t.Fatalf("want duplicate-tag error, got %v", err)
+	}
+}

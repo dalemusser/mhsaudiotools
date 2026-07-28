@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // RuleKind selects literal vs. regular-expression matching for a rule.
@@ -44,10 +45,35 @@ type Rule struct {
 type Profile struct {
 	Name  string `json:"name"`
 	Rules []Rule `json:"rules"`
+
+	compileOnce sync.Once
+	compileErr  error
+}
+
+// precompile compiles every regex rule exactly once up front. One profile can
+// be applied from several goroutines at once (the app previews while a run is
+// planning), and the rules' lazy compile caches are not safe to fill
+// concurrently.
+func (p *Profile) precompile() error {
+	p.compileOnce.Do(func() {
+		for i := range p.Rules {
+			if p.Rules[i].Kind != RuleRegex {
+				continue
+			}
+			if _, err := p.Rules[i].compile(); err != nil {
+				p.compileErr = fmt.Errorf("rule %d (%q): %w", i, p.Rules[i].From, err)
+				return
+			}
+		}
+	})
+	return p.compileErr
 }
 
 // Apply runs every rule against s in order and returns the cleaned text.
 func (p *Profile) Apply(s string) (string, error) {
+	if err := p.precompile(); err != nil {
+		return "", err
+	}
 	for i := range p.Rules {
 		out, err := p.Rules[i].apply(s)
 		if err != nil {

@@ -11,7 +11,11 @@
 <!-- Title bar: draggable, inset so the macOS traffic lights have room. -->
 <header style="--wails-draggable:drag" class="h-12 flex items-center justify-between px-5 border-b border-slate-800">
   <div class="pl-16 text-sm font-semibold tracking-wide text-slate-300">MHS Audio Generator</div>
-  <div id="account" class="text-xs text-slate-500">checking account…</div>
+  <div class="flex items-center gap-3">
+    <div id="account" class="text-xs text-slate-500">checking account…</div>
+    <button id="key-change" title="Enter a different ElevenLabs API key"
+      class="text-xs text-slate-500 underline decoration-dotted hover:text-slate-300">key…</button>
+  </div>
 </header>
 
 <main class="p-5 space-y-4 overflow-y-auto" style="height: calc(100% - 3rem)">

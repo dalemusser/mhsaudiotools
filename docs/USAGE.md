@@ -21,6 +21,14 @@ Both tools do the same thing: take **dialog**, apply your **voices**, and write
   them. *Babylon manifest* is for the web projects.
 - **Cleanup** — strips stage directions and formatting (`[em1]`, `{{PLACEHOLDER…}}`)
   and fixes pronunciations (`WAT247` → "Watt 2 4 7") before speaking. On by default.
+- **Model & emotion** — each voice can render on ElevenLabs **v2** (best likeness)
+  or **v3** (understands emotion tags). With **Apply emotion** on (CLI: `-emotion`,
+  or `-emotion-map` for a custom map), the writers' `(sighs)`/`(angry)` directions
+  are pulled out of every line: on **v3** voices they come back as audio tags, on
+  **v2** voices they're simply removed from the spoken text (instead of being read
+  aloud). Which voices should be v3 is a per-voice, by-ear choice; see the
+  [voice v2/v3 reference](voice-versions-status.html). *(CLI: `-model v3` makes v3
+  the default for voices that don't set one in the voices file.)*
 - **Resume / regenerate** — the tool remembers what it already made (a manifest in
   the output folder). Running again only generates new or changed lines. "Regenerate
   everything" / `-force` redoes them all.
@@ -133,6 +141,14 @@ mhsaudio generate -in toppo-lessons.txt -voices voices.json \
   -out ./lessons -default-speaker Toppo -timestamps
 ```
 
+Emotion on v3 voices (the dry run's sample and per-voice model column show
+what each file renders with):
+
+```bash
+mhsaudio generate -in export.csv -voices voices.json -out ./audio -emotion -dry-run
+mhsaudio generate -in export.csv -voices voices.json -out ./audio -emotion
+```
+
 ### `generate` flags
 
 | Flag | Meaning | Default |
@@ -148,7 +164,12 @@ mhsaudio generate -in toppo-lessons.txt -voices voices.json \
 | `-force` | regenerate everything | off |
 | `-no-cleanup` | disable text cleanup | off (cleanup on) |
 | `-profile` | custom cleanup profile JSON | built-in `mhs-dialogue` |
+| `-model` | model for voices that don't set one: `v2`, `v3`, or a full ID | `v2` |
+| `-emotion` | directions → v3 audio tags; stripped from v2 voices' text | off |
+| `-emotion-map` | custom emotion map JSON (implies `-emotion`) | built-in `mhs-emotion` |
 | `-default-speaker` | character voice for speaker-less lines | — |
+| `-default-voice` | raw voice ID for speaker-less lines (alternative to `-default-speaker`) | — |
+| `-key-file` | file holding the ElevenLabs API key | env, then `~/.elevenlabs_key` |
 | `-dry-run` | preview only, no API calls | off |
 | `-v` | list every file | off |
 
@@ -157,3 +178,15 @@ mhsaudio generate -in toppo-lessons.txt -voices voices.json \
 Re-running the same command only generates new or changed lines (it reads the
 manifest in the output folder). Press **Ctrl-C** to stop; the next run picks up
 where it left off. Use `-force` to redo everything.
+
+One migration note: output folders generated before the manifest recorded
+voice/model/format are honored as-is (nothing regenerates on upgrade) — but
+that also means the tool can't detect a voice recast that happened *before*
+the upgrade. If casting changed since those files were made, run once with
+`-force`.
+
+### Exit codes
+
+`0` only when everything asked for succeeded. A run where any file failed, or a
+dry run that found problems, exits non-zero — so scripts can chain on it
+(`mhsaudio generate … && deploy`).

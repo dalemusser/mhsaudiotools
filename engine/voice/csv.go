@@ -35,6 +35,11 @@ func LoadAssignmentsCSV(r io.Reader) (*Config, error) {
 	if len(records) == 0 {
 		return nil, fmt.Errorf("voice: assignments CSV is empty")
 	}
+	// Excel and Notepad save CSVs with a UTF-8 BOM; it rides on the first field
+	// and would defeat header detection.
+	if len(records[0]) > 0 {
+		records[0][0] = strings.TrimPrefix(records[0][0], "\ufeff")
+	}
 
 	charCol, idCol, nameCol, start := columns(records[0])
 

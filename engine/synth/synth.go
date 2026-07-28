@@ -19,7 +19,7 @@ type AudioFormat string
 const (
 	MP3_44100_192 AudioFormat = "mp3_44100_192"
 	MP3_44100_128 AudioFormat = "mp3_44100_128"
-	PCM_44100     AudioFormat = "pcm_44100" // wrapped into WAV by the output stage
+	PCM_44100     AudioFormat = "pcm_44100" // raw samples, written as .pcm (WAV wrapping is phase 2)
 )
 
 // VoiceSettings are the per-request expressiveness knobs.

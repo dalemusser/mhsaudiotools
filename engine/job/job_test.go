@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -507,5 +508,253 @@ func TestRunCancellation(t *testing.T) {
 	}
 	if res.Written >= len(lines) {
 		t.Errorf("Written = %d, expected cancellation to stop work early", res.Written)
+	}
+}
+
+// Changing anything that determines a file's content — voice, model, format,
+// or the timings toggle — must regenerate it even when the text is identical.
+func TestRunRegeneratesWhenVoiceModelFormatOrTimingsChange(t *testing.T) {
+	lines := []source.LineItem{{ID: "8_Toppo_2", Speaker: "Toppo", Text: "Hello cadet."}}
+
+	cases := []struct {
+		name   string
+		mutate func(r *Runner)
+	}{
+		{"voice", func(r *Runner) { r.Voices.Assignments[0].VoiceID = "v-other" }},
+		{"model", func(r *Runner) { r.Options.DefaultModel = synth.ModelV3 }},
+		{"format", func(r *Runner) { r.Options.Format = synth.AudioFormat("mp3_44100_192") }},
+		{"timings", func(r *Runner) { r.Options.WithTimestamps = true }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			r := newRunner(t, &fakeClient{}, dir, Options{})
+			if _, err := r.Run(context.Background(), lines); err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(r)
+			res, err := r.Run(context.Background(), lines)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Written != 1 {
+				t.Fatalf("after %s change: written = %d, want 1 (stale audio kept)", tc.name, res.Written)
+			}
+		})
+	}
+}
+
+// v1 manifests recorded only the text hash; those entries must keep matching
+// so an upgrade doesn't silently re-pay for existing output folders.
+func TestLegacyManifestEntriesStayUpToDate(t *testing.T) {
+	dir := t.TempDir()
+	lines := []source.LineItem{{ID: "8_Toppo_2", Speaker: "Toppo", Text: "Hello cadet."}}
+	r := newRunner(t, &fakeClient{}, dir, Options{})
+	if _, err := r.Run(context.Background(), lines); err != nil {
+		t.Fatal(err)
+	}
+
+	legacy := `{"files": {"8_Toppo_2.mp3": "` + hashText("Hello cadet.") + `"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, manifestName), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := r.Run(context.Background(), lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Written != 0 || res.SkippedFiles != 1 {
+		t.Fatalf("legacy entry regenerated: written=%d skipped=%d, want 0/1", res.Written, res.SkippedFiles)
+	}
+}
+
+// A corrupt manifest must fail loudly, not silently regenerate the whole batch.
+func TestCorruptManifestFailsLoudly(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, manifestName), []byte("{truncated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := newRunner(t, &fakeClient{}, dir, Options{})
+	if _, err := r.Run(context.Background(), testLines()); err == nil || !strings.Contains(err.Error(), "corrupt") {
+		t.Fatalf("want corrupt-manifest error, got %v", err)
+	}
+	if _, err := r.Plan(testLines()); err == nil {
+		t.Fatal("Plan accepted a corrupt manifest")
+	}
+}
+
+// IDs with separators or dot-dot must be rejected at plan time and must never
+// produce a file outside the output folder.
+func TestHostileLineIDsAreRejected(t *testing.T) {
+	dir := t.TempDir()
+	lines := []source.LineItem{
+		{ID: "../../escape", Speaker: "Toppo", Text: "hi"},
+		{ID: `..\..\escape`, Speaker: "Toppo", Text: "hi"},
+		{ID: "..", Speaker: "Toppo", Text: "hi"},
+		{ID: "nested/inside", Speaker: "Toppo", Text: "hi"},
+		{ID: "8_Toppo_2", Speaker: "Toppo", Text: "hi"}, // control: still generated
+	}
+	r := newRunner(t, &fakeClient{}, dir, Options{})
+	res, err := r.Run(context.Background(), lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed != 4 || res.Written != 1 {
+		t.Fatalf("failed=%d written=%d, want 4 rejected / 1 written", res.Failed, res.Written)
+	}
+	for _, p := range []string{
+		filepath.Join(dir, "..", "escape.mp3"),
+		filepath.Join(dir, "..", "..", "escape.mp3"),
+	} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("file escaped the output folder: %s", p)
+		}
+	}
+}
+
+// The manifest must land on disk periodically during a run, not only at the
+// end, so a crash/kill loses at most a handful of files' records.
+func TestManifestFlushedPeriodically(t *testing.T) {
+	dir := t.TempDir()
+	var lines []source.LineItem
+	for i := 0; i < manifestFlushEvery+5; i++ {
+		lines = append(lines, source.LineItem{
+			ID: fmt.Sprintf("8_Toppo_%d", i), Speaker: "Toppo", Text: fmt.Sprintf("Line %d.", i),
+		})
+	}
+	r := newRunner(t, &fakeClient{}, dir, Options{Concurrency: 4})
+	var sawFlush atomic.Bool
+	r.OnProgress = func(p Progress) {
+		// The flush happens in the same critical section as this callback, so
+		// by Done == manifestFlushEvery the file must exist.
+		if p.Done == manifestFlushEvery && p.Failed == 0 {
+			if _, err := os.Stat(filepath.Join(dir, manifestName)); err == nil {
+				sawFlush.Store(true)
+			}
+		}
+	}
+	if _, err := r.Run(context.Background(), lines); err != nil {
+		t.Fatal(err)
+	}
+	if !sawFlush.Load() {
+		t.Fatal("manifest was not flushed during the run")
+	}
+}
+
+// Progress must be monotonic and internally consistent under concurrency.
+func TestProgressIsMonotonic(t *testing.T) {
+	dir := t.TempDir()
+	var lines []source.LineItem
+	for i := 0; i < 40; i++ {
+		lines = append(lines, source.LineItem{
+			ID: fmt.Sprintf("8_Toppo_%d", i), Speaker: "Toppo", Text: fmt.Sprintf("Line %d.", i),
+		})
+	}
+	r := newRunner(t, &fakeClient{}, dir, Options{Concurrency: 8})
+	var mu sync.Mutex
+	last := -1
+	r.OnProgress = func(p Progress) {
+		mu.Lock()
+		defer mu.Unlock()
+		if p.Done < last {
+			t.Errorf("progress went backwards: %d after %d", p.Done, last)
+		}
+		last = p.Done
+	}
+	if _, err := r.Run(context.Background(), lines); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A legacy (v1) manifest entry with -timestamps must be grandfathered when the
+// sidecar already exists on disk — the v1 tool wrote sidecars too, and a whole
+// batch must not regenerate just because the manifest predates the Words field.
+// Without the sidecar it must regenerate (that's what produces it).
+func TestLegacyManifestWithTimestampsUsesSidecarOnDisk(t *testing.T) {
+	lines := []source.LineItem{{ID: "8_Toppo_2", Speaker: "Toppo", Text: "Hello cadet."}}
+
+	setup := func(t *testing.T) (string, *Runner) {
+		dir := t.TempDir()
+		r := newRunner(t, &fakeClient{}, dir, Options{WithTimestamps: true})
+		if _, err := r.Run(context.Background(), lines); err != nil {
+			t.Fatal(err)
+		}
+		legacy := `{"files": {"8_Toppo_2.mp3": "` + hashText("Hello cadet.") + `"}}` + "\n"
+		if err := os.WriteFile(filepath.Join(dir, manifestName), []byte(legacy), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir, r
+	}
+
+	t.Run("sidecar present: up to date", func(t *testing.T) {
+		_, r := setup(t)
+		res, err := r.Run(context.Background(), lines)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Written != 0 || res.SkippedFiles != 1 {
+			t.Fatalf("written=%d skipped=%d, want 0/1 (sidecar on disk must grandfather)", res.Written, res.SkippedFiles)
+		}
+	})
+
+	t.Run("sidecar deleted: regenerates", func(t *testing.T) {
+		dir, r := setup(t)
+		if err := os.Remove(filepath.Join(dir, "8_Toppo_2.words.json")); err != nil {
+			t.Fatal(err)
+		}
+		res, err := r.Run(context.Background(), lines)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Written != 1 {
+			t.Fatalf("written=%d, want 1 (missing sidecar must regenerate)", res.Written)
+		}
+	})
+}
+
+// A hostile speaker must not cost a paid API call on every run: the Babylon
+// layout splices the speaker into the path, and the reject has to happen at
+// plan time, before synthesis.
+func TestHostileSpeakerRejectedBeforeSynthesis(t *testing.T) {
+	dir := t.TempDir()
+	client := &fakeClient{}
+	r := newRunner(t, client, dir, Options{})
+	r.Layout = output.BabylonManifest{}
+	r.Voices.Assignments = append(r.Voices.Assignments, voice.Assignment{
+		Character: "..", VoiceID: "v-evil", VoiceName: "Evil",
+	})
+	lines := []source.LineItem{
+		{ID: "L1", Speaker: "..", Text: "escape attempt"},
+		{ID: "L2", Speaker: "Toppo", Text: "fine"},
+	}
+	res, err := r.Run(context.Background(), lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed != 1 || res.Written != 1 {
+		t.Fatalf("failed=%d written=%d, want 1/1", res.Failed, res.Written)
+	}
+	for _, req := range client.requests {
+		if req.VoiceID == "v-evil" {
+			t.Fatal("paid a synthesis call for a target that can never be written")
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "..", "L1.mp3")); !os.IsNotExist(err) {
+		t.Fatal("file escaped the output folder")
+	}
+}
+
+// Windows filename hazards are rejected at plan time on every platform, so a
+// batch generated on macOS still lands intact on a Windows checkout.
+func TestWindowsHostileIDsRejected(t *testing.T) {
+	for _, id := range []string{"scene:1", "NUL", "con.mp3", "trailing.", "trailing "} {
+		if err := checkID(id); err == nil {
+			t.Errorf("checkID(%q) = nil, want error", id)
+		}
+	}
+	for _, id := range []string{"8_Toppo_2", "console_log", "NULL_check", "a.b.c"} {
+		if err := checkID(id); err != nil {
+			t.Errorf("checkID(%q) = %v, want nil", id, err)
+		}
 	}
 }

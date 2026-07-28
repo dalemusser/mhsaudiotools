@@ -7,12 +7,16 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dalemusser/mhsaudiotools/engine/emotion"
 	"github.com/dalemusser/mhsaudiotools/engine/job"
@@ -29,13 +33,57 @@ import (
 type App struct {
 	ctx context.Context
 
-	mu     sync.Mutex
-	cancel context.CancelFunc // non-nil while a run is in flight
+	mu       sync.Mutex
+	cancel   context.CancelFunc // non-nil while a run is in flight
+	runDone  chan struct{}      // closed when the in-flight Generate returns
+	quitting bool               // a deferred (Windows) close is already in flight
 }
 
 func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) { a.ctx = ctx }
+
+// beforeClose runs when the user closes the window. Wails never cancels the app
+// context on close, so without this a mid-run quit would kill the process
+// wherever the worker pool happened to be — losing the manifest record of audio
+// already paid for. Cancel the run and wait (bounded) for Generate to finish
+// saving before letting the window go.
+func (a *App) beforeClose(ctx context.Context) bool {
+	a.mu.Lock()
+	if a.quitting {
+		a.mu.Unlock()
+		return false // our own deferred quit coming back around — let it close
+	}
+	cancel, done := a.cancel, a.runDone
+	a.mu.Unlock()
+	if cancel == nil {
+		return false // nothing running — close normally
+	}
+	cancel()
+
+	// On Windows this hook runs synchronously on the message loop, so blocking
+	// here ghosts the window ("Not Responding"). Deny this close, finish the
+	// drain off-thread, then quit programmatically. macOS and Linux invoke the
+	// hook on its own goroutine, so blocking there is fine.
+	if goruntime.GOOS == "windows" {
+		go func() {
+			select {
+			case <-done:
+			case <-time.After(15 * time.Second):
+			}
+			a.mu.Lock()
+			a.quitting = true
+			a.mu.Unlock()
+			runtime.Quit(a.ctx)
+		}()
+		return true
+	}
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+	}
+	return false
+}
 
 // --- settings ---------------------------------------------------------------
 
@@ -657,6 +705,9 @@ func (a *App) Preview(req Request) (*Preview, error) {
 
 	samples := make([]SampleItem, 0, 8)
 	for _, it := range plan.Items {
+		if it.UpToDate {
+			continue // show what this run will actually generate, like the tally above
+		}
 		if len(samples) == 8 {
 			break
 		}
@@ -716,6 +767,7 @@ func (a *App) Generate(req Request) (*RunSummary, error) {
 	}
 
 	ctx, cancel := context.WithCancel(a.ctx)
+	done := make(chan struct{})
 	a.mu.Lock()
 	if a.cancel != nil {
 		a.mu.Unlock()
@@ -723,13 +775,16 @@ func (a *App) Generate(req Request) (*RunSummary, error) {
 		return nil, fmt.Errorf("a generation run is already in progress")
 	}
 	a.cancel = cancel
+	a.runDone = done
 	a.mu.Unlock()
 
 	defer func() {
 		a.mu.Lock()
 		a.cancel = nil
+		a.runDone = nil
 		a.mu.Unlock()
 		cancel()
+		close(done)
 	}()
 
 	res, runErr := runner.Run(ctx, lines)
@@ -737,13 +792,17 @@ func (a *App) Generate(req Request) (*RunSummary, error) {
 		return nil, runErr
 	}
 
+	// Cancellation is what the run actually returned, not the ctx state at this
+	// instant — a Cancel click racing normal completion (or a real failure)
+	// must not relabel the run and swallow its error.
+	canceled := errors.Is(runErr, context.Canceled) || (runErr == nil && ctx.Err() != nil)
 	sum := &RunSummary{
 		Written:      res.Written,
 		UpToDate:     res.SkippedFiles,
 		SkippedLines: res.SkippedLines,
 		Failed:       res.Failed,
 		ManifestPath: res.ManifestPath,
-		Canceled:     ctx.Err() != nil,
+		Canceled:     canceled,
 	}
 	for i, e := range res.Errors {
 		if i == 50 {
@@ -753,9 +812,11 @@ func (a *App) Generate(req Request) (*RunSummary, error) {
 		sum.Problems = append(sum.Problems, e.Error())
 	}
 	// Cancellation is a normal outcome, not an error: the manifest is saved, so
-	// re-running resumes where it stopped.
-	if runErr != nil && !sum.Canceled {
-		return sum, runErr
+	// re-running resumes where it stopped. Other errors ride in Problems —
+	// Wails delivers a result OR an error, never both, and the counts matter
+	// even when the final manifest save failed.
+	if runErr != nil && !canceled {
+		sum.Problems = append([]string{"run error: " + runErr.Error()}, sum.Problems...)
 	}
 	return sum, nil
 }
@@ -771,12 +832,36 @@ func (a *App) Cancel() {
 }
 
 // RevealOutput opens the output folder in the system file manager — the payoff
-// step, since the whole point is files on disk.
+// step, since the whole point is files on disk. This execs the platform opener
+// directly: Wails' BrowserOpenURL rejects the file:// scheme outright, so it
+// can never open a folder.
 func (a *App) RevealOutput(dir string) error {
 	if dir == "" {
 		return fmt.Errorf("no output folder")
 	}
-	runtime.BrowserOpenURL(a.ctx, "file://"+dir)
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("output folder: %w", err)
+	}
+	if goruntime.GOOS == "windows" {
+		// explorer exits nonzero even on success, so start it detached and
+		// don't judge the exit code.
+		cmd := exec.Command("explorer", dir)
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("opening file manager: %w", err)
+		}
+		go func() { _ = cmd.Wait() }()
+		return nil
+	}
+	// open/xdg-open hand off and exit immediately, and their exit codes are
+	// meaningful (e.g. xdg-open with no file manager) — run them to completion
+	// so the failure reaches the UI instead of a silently dead button.
+	opener := "xdg-open"
+	if goruntime.GOOS == "darwin" {
+		opener = "open"
+	}
+	if out, err := exec.Command(opener, dir).CombinedOutput(); err != nil {
+		return fmt.Errorf("opening file manager: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
 	return nil
 }
 

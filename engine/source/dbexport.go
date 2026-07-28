@@ -64,6 +64,8 @@ func (DBExport) Parse(r io.Reader) ([]LineItem, error) {
 		items      []LineItem
 		inSection  bool
 		headerSkip int
+		seen       = map[string]bool{}
+		dups       []string
 	)
 	for {
 		rec, err := cr.Read()
@@ -107,6 +109,14 @@ func (DBExport) Parse(r io.Reader) ([]LineItem, error) {
 		if tag == "" {
 			continue
 		}
+		// The tag is the filename AND the game's lookup key, so a duplicate is
+		// export corruption: silently renaming would produce audio the game
+		// never loads, and keeping both would race two writes on one file.
+		if seen[tag] {
+			dups = append(dups, tag)
+			continue
+		}
+		seen[tag] = true
 		direction := ""
 		if len(rec) > colParenthetical {
 			direction = strings.TrimSpace(rec[colParenthetical])
@@ -121,6 +131,12 @@ func (DBExport) Parse(r io.Reader) ([]LineItem, error) {
 	}
 	if !inSection {
 		return nil, fmt.Errorf("dbexport: no %q section found", sectionDialogueEntries)
+	}
+	if len(dups) > 0 {
+		if len(dups) > 10 {
+			dups = append(dups[:10], fmt.Sprintf("… and %d more", len(dups)-10))
+		}
+		return nil, fmt.Errorf("dbexport: duplicate entry tags (fix the export): %s", strings.Join(dups, ", "))
 	}
 	return items, nil
 }

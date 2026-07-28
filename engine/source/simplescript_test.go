@@ -53,3 +53,39 @@ func TestSimpleScriptDetect(t *testing.T) {
 		t.Error("expected Detect to reject prose")
 	}
 }
+
+// A UTF-8 BOM (Excel/Notepad) must not become an invisible prefix on the first
+// line's ID — the resulting filename would never match the game's lookup.
+func TestSimpleScriptStripsBOM(t *testing.T) {
+	items, err := SimpleScript{}.Parse(strings.NewReader("\ufeffu1argl1: Good morning.\nu1argl2: Hello.\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2", len(items))
+	}
+	if items[0].ID != "u1argl1" {
+		t.Fatalf("first ID = %q, want %q (BOM leaked in)", items[0].ID, "u1argl1")
+	}
+	if !(SimpleScript{}).Detect([]byte("\ufeffu1argl1: Good morning.\nu1argl2: Hello.\n")) {
+		t.Fatal("Detect failed on BOM'd sample")
+	}
+}
+
+// Duplicate suffixing must never itself collide with a literal ID in the file.
+func TestSimpleScriptDuplicateSuffixCannotCollide(t *testing.T) {
+	items, err := SimpleScript{}.Parse(strings.NewReader("a: one\na: two\na_2: three\na: four\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, it := range items {
+		if seen[it.ID] {
+			t.Fatalf("duplicate ID %q in output: %+v", it.ID, items)
+		}
+		seen[it.ID] = true
+	}
+	if len(items) != 4 {
+		t.Fatalf("got %d items, want 4", len(items))
+	}
+}

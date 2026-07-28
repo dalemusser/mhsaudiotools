@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/dalemusser/mhsaudiotools/engine/job"
 	"github.com/dalemusser/mhsaudiotools/engine/output"
-	"github.com/dalemusser/mhsaudiotools/engine/source"
 	"github.com/dalemusser/mhsaudiotools/engine/synth"
 	"github.com/dalemusser/mhsaudiotools/engine/voice"
 )
@@ -33,6 +33,9 @@ func runGenerate(args []string) error {
 		dryRun      = fs.Bool("dry-run", false, "show what would be generated; makes no API calls")
 		profilePath = fs.String("profile", "", "cleanup profile JSON (default: built-in mhs-dialogue)")
 		noCleanup   = fs.Bool("no-cleanup", false, "disable text cleanup entirely")
+		model       = fs.String("model", "", "model for voices that don't set one in the voices file: v2 (default), v3, or a full ElevenLabs model ID")
+		emotionOn   = fs.Bool("emotion", false, "turn the writers' (sighs)/(angry) directions into v3 audio tags; on v2 files the directions are stripped from the spoken text")
+		emotionPath = fs.String("emotion-map", "", "emotion map JSON (default: built-in mhs-emotion; implies -emotion)")
 		defSpeaker  = fs.String("default-speaker", "", "character whose voice speaks lines that have no speaker (e.g. Toppo)")
 		defVoice    = fs.String("default-voice", "", "voice ID for lines that have no speaker")
 		keyFile     = fs.String("key-file", "", "file holding the ElevenLabs API key")
@@ -44,7 +47,9 @@ func runGenerate(args []string) error {
 		fmt.Fprintf(os.Stderr, "\nExamples:\n"+
 			"  mhsaudio generate -in export.csv -voices voices.json -out ./audio -dry-run\n"+
 			"  mhsaudio generate -in export.csv -voices voices.json -out ./audio\n"+
-			"  mhsaudio generate -in lessons.txt -voices voices.csv -out ./lessons -default-speaker Toppo\n")
+			"  mhsaudio generate -in lessons.txt -voices voices.csv -out ./lessons -default-speaker Toppo\n"+
+			"  mhsaudio generate -in export.csv -voices voices.json -out ./audio -emotion -dry-run\n"+
+			"  mhsaudio generate -in export.csv -voices voices.json -out ./audio -model v3 -emotion\n")
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -79,22 +84,43 @@ func runGenerate(args []string) error {
 	if err != nil {
 		return err
 	}
+	emo, err := loadEmotionMap(*emotionPath, *emotionOn)
+	if err != nil {
+		return err
+	}
 	layout, err := pickLayout(*layoutName)
 	if err != nil {
 		return err
 	}
+	defaultModel := resolveModel(*model)
 
 	runner := &job.Runner{
 		Cleanup: profile,
 		Voices:  cfg,
 		Layout:  layout,
+		Emotion: emo,
 		Options: job.Options{
 			OutputDir:      *outDir,
 			Format:         synth.AudioFormat(*format),
 			WithTimestamps: *timestamps,
 			Concurrency:    *concurrency,
 			Force:          *force,
+			DefaultModel:   defaultModel,
 		},
+	}
+
+	// Plan once, up front: it needs no API key, surfaces a corrupt manifest
+	// before anything else, and the header's model/emotion facts come from the
+	// files actually planned — not merely what the voices file configures.
+	plan, err := runner.Plan(lines)
+	if err != nil {
+		return err
+	}
+	v3Files := 0
+	for _, it := range plan.Items {
+		if it.Model == synth.ModelV3 {
+			v3Files++
+		}
 	}
 
 	// Header (shared by dry runs and real runs).
@@ -105,11 +131,22 @@ func runGenerate(args []string) error {
 	} else {
 		fmt.Printf("Cleanup:  disabled\n")
 	}
+	fmt.Printf("Models:   %d of %d files render v3 (default %s)\n",
+		v3Files, len(plan.Items), modelShort(firstNonEmpty(defaultModel, synth.ModelV2)))
+	if emo != nil {
+		fmt.Printf("Emotion:  %s (%d tags — tags apply to v3 files; directions are stripped everywhere)\n",
+			emo.Name, len(emo.Tags))
+		if v3Files == 0 {
+			fmt.Fprintf(os.Stderr, "note: no file renders on v3, so no audio tags will be applied — "+
+				"the writers' (sighs)/(angry) directions are still removed from the spoken text, "+
+				"which changes it and regenerates affected lines\n")
+		}
+	}
 	fmt.Printf("Output:   %s  [layout %s, format %s, timestamps %v]\n\n",
 		*outDir, layout.Name(), *format, *timestamps)
 
 	if *dryRun {
-		return dryRunPlan(runner, lines, *verbose)
+		return dryRunPlan(plan, *verbose)
 	}
 
 	key, err := resolveAPIKey(*keyFile)
@@ -119,11 +156,14 @@ func runGenerate(args []string) error {
 	runner.Client = synth.NewElevenLabs(key)
 
 	// Ctrl-C cancels cleanly: in-flight work stops and the manifest is saved, so
-	// a re-run resumes rather than starting over.
+	// a re-run resumes rather than starting over. Once the first signal has
+	// canceled the context, release the handler so a second Ctrl-C force-quits
+	// instead of being swallowed if teardown ever stalls.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() { <-ctx.Done(); stop() }()
 
-	reportConcurrency(ctx, runner, *concurrency)
+	runner.Options.Concurrency = resolveConcurrency(ctx, runner, *concurrency)
 
 	pr := newProgressPrinter()
 	runner.OnProgress = pr.update
@@ -136,22 +176,23 @@ func runGenerate(args []string) error {
 		printResult(res, time.Since(start))
 	}
 	if runErr != nil {
-		if ctx.Err() != nil {
+		// The run's own verdict, not the ctx state at this instant — a Ctrl-C
+		// racing a genuine failure must not relabel it and swallow the error.
+		if errors.Is(runErr, context.Canceled) {
 			return fmt.Errorf("canceled — re-run to resume where it stopped")
 		}
 		return runErr
+	}
+	if res != nil && res.Failed > 0 {
+		// Scripts chain on the exit code; a run with failures must not exit 0.
+		return fmt.Errorf("%s of %s files failed — re-run to retry just those", commas(res.Failed), commas(res.Targets))
 	}
 	return nil
 }
 
 // dryRunPlan previews the run without touching the API — the cheap sanity check
 // before committing to thousands of paid requests.
-func dryRunPlan(runner *job.Runner, lines []source.LineItem, verbose bool) error {
-	plan, err := runner.Plan(lines)
-	if err != nil {
-		return err
-	}
-
+func dryRunPlan(plan *job.PlanResult, verbose bool) error {
 	fmt.Printf("DRY RUN — no API calls, nothing written\n\n")
 	fmt.Printf("  lines:          %s parsed, %s cleaned to nothing\n",
 		commas(plan.Lines), commas(plan.SkippedLines))
@@ -163,8 +204,12 @@ func dryRunPlan(runner *job.Runner, lines []source.LineItem, verbose bool) error
 		fmt.Printf("  problems:       %s\n", commas(plan.Failed))
 	}
 
-	// Per-voice breakdown: the quickest way to spot a miscast character.
+	// Per-voice breakdown: the quickest way to spot a miscast character — and,
+	// with the model column, which voices render v3 (and so get emotion tags).
+	// Two characters can share one ElevenLabs voice name on different models;
+	// that shows as "mixed" rather than whichever target happened to come last.
 	byVoice := map[string]int{}
+	voiceModel := map[string]string{}
 	for _, it := range plan.Items {
 		if it.UpToDate {
 			continue
@@ -174,8 +219,19 @@ func dryRunPlan(runner *job.Runner, lines []source.LineItem, verbose bool) error
 			name = it.VoiceID
 		}
 		byVoice[name]++
+		m := modelShort(it.Model)
+		if prev, ok := voiceModel[name]; ok && prev != m {
+			m = "mixed"
+		}
+		voiceModel[name] = m
 	}
 	if len(byVoice) > 0 {
+		w := 4
+		for _, m := range voiceModel {
+			if len(m) > w {
+				w = len(m)
+			}
+		}
 		fmt.Printf("\n  files per voice:\n")
 		names := make([]string, 0, len(byVoice))
 		for n := range byVoice {
@@ -183,7 +239,7 @@ func dryRunPlan(runner *job.Runner, lines []source.LineItem, verbose bool) error
 		}
 		sort.Strings(names)
 		for _, n := range names {
-			fmt.Printf("    %-22s %s\n", n, commas(byVoice[n]))
+			fmt.Printf("    %-22s %-*s %s\n", n, w, voiceModel[n], commas(byVoice[n]))
 		}
 	}
 
@@ -205,7 +261,7 @@ func dryRunPlan(runner *job.Runner, lines []source.LineItem, verbose bool) error
 			if it.UpToDate {
 				status = "skip    "
 			}
-			fmt.Printf("    %s  %-34s [%s]\n", status, it.RelPath, it.VoiceName)
+			fmt.Printf("    %s  %-34s %-4s [%s]\n", status, it.RelPath, modelShort(it.Model), it.VoiceName)
 		}
 	} else if n := len(plan.Items); n > 0 {
 		fmt.Printf("\n  sample (-v for all %s):\n", commas(n))
@@ -213,8 +269,12 @@ func dryRunPlan(runner *job.Runner, lines []source.LineItem, verbose bool) error
 			if i == 5 {
 				break
 			}
-			fmt.Printf("    %-34s [%s]  %.44q\n", it.RelPath, it.VoiceName, it.Text)
+			fmt.Printf("    %-34s %-4s [%s]  %.44q\n", it.RelPath, modelShort(it.Model), it.VoiceName, it.Text)
 		}
+	}
+	if plan.Failed > 0 {
+		// Preflight checks are scriptable; problems must not exit 0.
+		return fmt.Errorf("dry run found %d problem(s)", plan.Failed)
 	}
 	return nil
 }
@@ -234,6 +294,8 @@ func pickLayout(name string) (output.Layout, error) {
 // naming a character in the config or by giving a raw voice ID.
 func applyDefaultVoice(cfg *voice.Config, speaker, voiceID string) error {
 	switch {
+	case speaker != "" && voiceID != "":
+		return fmt.Errorf("-default-speaker and -default-voice are mutually exclusive; pass one")
 	case speaker != "":
 		a, ok := cfg.VoiceFor(speaker)
 		if !ok {
@@ -246,23 +308,27 @@ func applyDefaultVoice(cfg *voice.Config, speaker, voiceID string) error {
 	return nil
 }
 
-// reportConcurrency tells the user how many requests will run in parallel and why.
-func reportConcurrency(ctx context.Context, runner *job.Runner, requested int) {
+// resolveConcurrency picks the worker-pool size once, prints it, and returns it
+// for Options.Concurrency — so the number reported and the number used cannot
+// diverge (the runner would otherwise re-resolve it with a second API call that
+// could fail differently).
+func resolveConcurrency(ctx context.Context, runner *job.Runner, requested int) int {
 	if requested > 0 {
 		fmt.Printf("Parallel: %d (set explicitly)\n", requested)
-		return
+		return requested
 	}
 	sub, err := runner.Client.Subscription(ctx)
 	if err != nil {
 		fmt.Printf("Parallel: %d (couldn't read the account; using a safe default)\n", synth.ConservativeConcurrency)
-		return
+		return synth.ConservativeConcurrency
 	}
 	n, known := synth.MaxConcurrency(sub.Tier)
 	if !known {
 		fmt.Printf("Parallel: %d (tier %q not recognized; using a safe default)\n", synth.ConservativeConcurrency, sub.Tier)
-		return
+		return synth.ConservativeConcurrency
 	}
 	fmt.Printf("Parallel: %d (max for tier %q)\n", n, sub.Tier)
+	return n
 }
 
 func printResult(res *job.Result, elapsed time.Duration) {

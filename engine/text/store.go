@@ -96,16 +96,15 @@ func (p *Profile) Save(path string) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-// Validate compiles every regex rule up front, so a typo surfaces when the
-// profile is loaded rather than midway through a run of thousands of lines.
+// Validate rejects rules that would corrupt output — an empty "from" makes a
+// replace insert its text between every character of every line — and compiles
+// every regex up front, so a typo surfaces at load time rather than midway
+// through a run of thousands of lines.
 func (p *Profile) Validate() error {
 	for i := range p.Rules {
-		if p.Rules[i].Kind != RuleRegex {
-			continue
-		}
-		if _, err := p.Rules[i].compile(); err != nil {
-			return fmt.Errorf("rule %d (%q): %w", i, p.Rules[i].From, err)
+		if p.Rules[i].From == "" {
+			return fmt.Errorf("rule %d has an empty \"from\"", i)
 		}
 	}
-	return nil
+	return p.precompile()
 }

@@ -174,3 +174,40 @@ func TestValidateCatchesGaps(t *testing.T) {
 		t.Errorf("problems = %v, want one naming Player2", problems)
 	}
 }
+
+// A routine CSV re-import must not wipe per-character model (v2/v3) choices —
+// the CSV has no model column. A character whose voice changed gets a fresh
+// (empty) model on purpose: a new voice needs a new by-ear decision.
+func TestMergeFromKeepsCharacterModels(t *testing.T) {
+	cfg := &Config{
+		Assignments: []Assignment{
+			{Character: "Toppo", VoiceID: "v-toppo", VoiceName: "Amy", Model: "eleven_v3"},
+			{Character: "DANI", VoiceID: "v-dani", VoiceName: "Alex", Model: "eleven_v3"},
+		},
+	}
+	cfg.MergeFrom(&Config{
+		Assignments: []Assignment{
+			{Character: "toppo", VoiceID: "v-toppo", VoiceName: "Amy 2"},   // same voice, case-folded name
+			{Character: "DANI", VoiceID: "v-recast", VoiceName: "Someone"}, // voice changed
+		},
+	})
+	if got := cfg.Assignments[0].Model; got != "eleven_v3" {
+		t.Errorf("Toppo model = %q, want eleven_v3 carried forward", got)
+	}
+	if got := cfg.Assignments[1].Model; got != "" {
+		t.Errorf("recast DANI model = %q, want empty (fresh by-ear choice)", got)
+	}
+}
+
+// A UTF-8 BOM on the header row must not defeat header detection (which would
+// turn the header itself into a junk assignment).
+func TestAssignmentsCSVStripsBOM(t *testing.T) {
+	csv := "\ufeffCharacter:,Voice ID:,Voice Name:\nToppo,v-toppo,Amy\n"
+	cfg, err := LoadAssignmentsCSV(strings.NewReader(csv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Assignments) != 1 || cfg.Assignments[0].Character != "Toppo" {
+		t.Fatalf("BOM broke header detection: %+v", cfg.Assignments)
+	}
+}

@@ -62,3 +62,31 @@ func TestApply(t *testing.T) {
 		t.Errorf("nil map apply = %q", got)
 	}
 }
+
+// Nested directions must peel cleanly — no "(angry " fragment may survive into
+// the spoken text — while unbalanced parens stay visible on purpose.
+func TestExtractNestedAndUnbalancedParens(t *testing.T) {
+	clean, dirs := Extract("Hello (angry (very)) cadet")
+	if clean != "Hello cadet" {
+		t.Errorf("clean = %q, want %q", clean, "Hello cadet")
+	}
+	if len(dirs) != 2 || dirs[0] != "very" || dirs[1] != "angry" {
+		t.Errorf("directions = %v, want [very angry]", dirs)
+	}
+
+	clean, dirs = Extract("(sighs I forgot to close this")
+	if clean != "(sighs I forgot to close this" || len(dirs) != 0 {
+		t.Errorf("unbalanced parens must pass through, got %q %v", clean, dirs)
+	}
+}
+
+// Peeling a nested parenthetical leaves doubled spaces in the outer direction;
+// the map lookup must still match a single-spaced phrase.
+func TestNestedDirectionWhitespaceStillMatchesMap(t *testing.T) {
+	m := &Map{Tags: map[string]string{"angry shout": "[shouts]"}}
+	_, dirs := Extract("(angry (very) shout) hi")
+	got := m.Apply("hi", dirs)
+	if got != "[shouts] hi" {
+		t.Fatalf("got %q, want %q", got, "[shouts] hi")
+	}
+}
