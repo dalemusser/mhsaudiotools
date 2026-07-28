@@ -120,12 +120,12 @@ than a fixed offset. That single "find where entries begin" behavior is what
 lets one adapter consume both variants. (Ported from
 `prior-apps/mhs dialogue 061026/VoiceLineGenerator.py`.)
 
-**`simplescript`** — the writer/artist format: one spoken line per row as
-`ID: text`, where `ID` becomes the audio filename. The path for dialog that
-isn't a Dialogue System export (a writer's cutscene/lesson script). See
-`prior-apps/audiotools/toppo-lessons-070926.txt`.
-*Phase‑2 refinement:* a formalized variant carrying an optional speaker
-(`ID | Speaker: text`) plus a default voice, for multi‑character scripts.
+**`simplescript`** — the writer/artist format: one spoken line per row, either
+`ID: text` (speaker‑less; the run's default voice) or `ID | Speaker: text`
+(multi‑character scripts; `Player` fans out across the slots like any other
+source), freely mixed in one file. `ID` becomes the audio filename. The path
+for dialog that isn't a Dialogue System export (a writer's cutscene/lesson
+script). See `prior-apps/audiotools/toppo-lessons-070926.txt`.
 
 **Babylon web‑app sources** — out of scope for the team app (Dale maintains
 those separately), but the `babylon-manifest` output layout keeps that path open.
@@ -177,6 +177,16 @@ shareable **cleanup profiles**.
 
 *Future:* ElevenLabs server‑side **pronunciation dictionaries** could absorb the
 pronunciation rules; the portable string‑replace approach ships first.
+Verified live and then **built** the same day (`docs/pronunciation-dictionaries.md`):
+**alias** rules work on both of our models and keep the original spelling in
+alignment/captions — required for text highlighting during dialog — so
+pronunciation moved out of the cleanup profile into `engine/pron`: a
+pronunciations.json (shared per-user file by default, editable in-app,
+CLI `-pronunciations`), auto-published to one account dictionary (created once,
+then diff-updated in place via add-rules/remove-rules), attached to every
+request, and keyed into the resume manifest per affected line. **Phoneme**
+rules are silently ignored on multilingual v2/v3 (turbo/flash only), so the
+engine sends alias rules only.
 
 ---
 
@@ -252,8 +262,13 @@ A `Layout` maps a line **plus its resolved voicing** to `Target`s
 lands in the same folder with the same voice.
 
 **`babylon-manifest`** — alternate layout for Dale's Babylon web projects:
-per‑speaker folders + a JSON manifest with word timings. (Paths implemented;
-manifest emission is phase 2.)
+per‑speaker folders, plus `ceremony_audio.json` — the manifest the ceremony
+player consumes, format‑compatible with the prior Python
+(`generate_ceremony_audio.py`): per item the `assets/audio/…` URL,
+`[startSec, word]` caption pairs, duration, and text hash. Emitted after every
+completed run covering all non‑failed files (an incremental run still describes
+the whole set); words/duration are folded in from the `.words.json` sidecars,
+so generate with timestamps on when the player needs captions.
 
 When timestamps are requested, word timings are written beside each audio file as
 `<id>.words.json`.
@@ -352,6 +367,7 @@ mhsaudio account                     # tier + max concurrency
 mhsaudio voices [-filter tera]       # the account's voices, for picking IDs
 mhsaudio import-voices -csv VoiceAssignments.csv -out voices.json
 mhsaudio generate -in <source> -voices voices.json -out <dir> [-dry-run]
+mhsaudio jobs                        # recent runs (history shared with the app)
 ```
 
 `generate` flags: `-source` (auto|dbexport|simplescript), `-layout`, `-format`,
@@ -379,12 +395,34 @@ mhsaudio generate -in <source> -voices voices.json -out <dir> [-dry-run]
   download/write to chosen folder.
 
 **Phase 2**
-- WAV / OGG output. Per‑line voice‑setting overrides. Richer job management
-  (history, expiry). Formalized `simplescript` (speaker + default voice).
+- ~~Richer job management (history, expiry)~~ — **built**: per‑run records in
+  the user config dir (`jobs.json`, pruned to 50), shared by both shells; the
+  app shows a History card (resume/run‑again/open/remove; interrupted runs
+  detected at startup), the CLI records runs and lists them via `mhsaudio jobs`.
+- ~~Formalized `simplescript` (speaker + default voice)~~ — **built**
+  (`ID | Speaker: text`).
+- ~~Babylon `ceremony_audio.json` emission~~ — **built** (see §7).
+- ~~API key in the OS keychain~~ — **built for macOS** (zero‑dep via the
+  system `security` tool; resolution order env → key file → Keychain →
+  dotfile; opt‑in via the app's key screen or `mhsaudio key -store-keychain`).
+  Windows Credential Manager is a possible follow‑up; Linux stays on the
+  dotfile (no universal secret service).
+- ~~Per‑line voice‑setting overrides~~ — **built** (approved design, see
+  `docs/voice-settings-proposal.md`): per‑voice `settings` in voices.json
+  (nil = ElevenLabs defaults; edited via ⚙ in the voice editor, auditioned by
+  the ▶ preview, carried across CSV re‑imports), plus per‑line
+  `voice-overrides.json` keyed by line ID exposing the audible knobs
+  (stability/style/speed; app picker + CLI `-voice-overrides`). Effective
+  settings join the resume manifest, so a tweak regenerates exactly the
+  affected files.
+- WAV / OGG output — deferred: Unity consumes the mp3s directly; revisit only
+  if a real need appears.
 
 **Phase 3**
 - Expressive `eleven_v3` audio tags ("how a line is said") — **engine built**
-  (see below). UI/CLI exposure and pronunciation dictionaries still to come.
+  (see below), with UI and CLI exposure since built. Pronunciation dictionaries:
+  verified live, then **built** — see §5 note and
+  `docs/pronunciation-dictionaries.md`. Phase 3 is complete.
 
 ---
 

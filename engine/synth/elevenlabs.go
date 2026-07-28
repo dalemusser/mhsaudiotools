@@ -227,29 +227,135 @@ func (c *ElevenLabs) Voices(ctx context.Context) ([]Voice, error) {
 	return out, nil
 }
 
+// PronunciationRule is one alias to publish: say To when the text reads From.
+type PronunciationRule struct {
+	From string
+	To   string
+}
+
+// Pronunciation-dictionary management. These are calls on the concrete client,
+// deliberately not part of the Client interface — the job runner never
+// publishes. Dictionaries are account-level and versioned with NO delete
+// endpoint, so callers must reuse one dictionary per project: create once,
+// then update it in place (each update mints a new version of the same
+// dictionary; verified live 2026-07-27).
+
+type pronRuleBody struct {
+	StringToReplace string `json:"string_to_replace"`
+	Type            string `json:"type"`
+	Alias           string `json:"alias"`
+}
+
+type pronDictResponse struct {
+	ID        string `json:"id"`
+	VersionID string `json:"version_id"`
+}
+
+func pronRuleBodies(rules []PronunciationRule) []pronRuleBody {
+	rb := make([]pronRuleBody, 0, len(rules))
+	for _, r := range rules {
+		rb = append(rb, pronRuleBody{StringToReplace: r.From, Type: "alias", Alias: r.To})
+	}
+	return rb
+}
+
+// CreatePronunciationDictionary uploads alias rules as a brand-new dictionary
+// and returns its locator.
+func (c *ElevenLabs) CreatePronunciationDictionary(ctx context.Context, name string, rules []PronunciationRule) (DictionaryLocator, error) {
+	return c.pronCall(ctx, "/v1/pronunciation-dictionaries/add-from-rules", struct {
+		Name  string         `json:"name"`
+		Rules []pronRuleBody `json:"rules"`
+	}{Name: name, Rules: pronRuleBodies(rules)})
+}
+
+// AddPronunciationRules adds or overwrites rules on an existing dictionary,
+// returning the locator of the new version it mints.
+func (c *ElevenLabs) AddPronunciationRules(ctx context.Context, dictID string, rules []PronunciationRule) (DictionaryLocator, error) {
+	return c.pronCall(ctx, "/v1/pronunciation-dictionaries/"+url.PathEscape(dictID)+"/add-rules", struct {
+		Rules []pronRuleBody `json:"rules"`
+	}{Rules: pronRuleBodies(rules)})
+}
+
+// RemovePronunciationRules removes rules (by their written form) from an
+// existing dictionary, returning the locator of the new version it mints.
+func (c *ElevenLabs) RemovePronunciationRules(ctx context.Context, dictID string, ruleStrings []string) (DictionaryLocator, error) {
+	return c.pronCall(ctx, "/v1/pronunciation-dictionaries/"+url.PathEscape(dictID)+"/remove-rules", struct {
+		RuleStrings []string `json:"rule_strings"`
+	}{RuleStrings: ruleStrings})
+}
+
+func (c *ElevenLabs) pronCall(ctx context.Context, path string, reqBody any) (DictionaryLocator, error) {
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return DictionaryLocator{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return DictionaryLocator{}, err
+	}
+	httpReq.Header.Set("xi-api-key", c.APIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTP.Do(httpReq)
+	if err != nil {
+		return DictionaryLocator{}, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return DictionaryLocator{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return DictionaryLocator{}, parseAPIError(resp.StatusCode, data, 0)
+	}
+	var pr pronDictResponse
+	if err := json.Unmarshal(data, &pr); err != nil {
+		return DictionaryLocator{}, fmt.Errorf("synth: decoding dictionary response: %w", err)
+	}
+	if pr.ID == "" || pr.VersionID == "" {
+		return DictionaryLocator{}, fmt.Errorf("synth: dictionary response missing id/version")
+	}
+	return DictionaryLocator{ID: pr.ID, VersionID: pr.VersionID}, nil
+}
+
 // --- request/response bodies -------------------------------------------------
 
 type ttsRequestBody struct {
 	Text          string             `json:"text"`
 	ModelID       string             `json:"model_id"`
 	VoiceSettings *voiceSettingsBody `json:"voice_settings,omitempty"`
+
+	PronunciationDictionaryLocators []dictLocatorBody `json:"pronunciation_dictionary_locators,omitempty"`
 }
 
+type dictLocatorBody struct {
+	PronunciationDictionaryID string `json:"pronunciation_dictionary_id"`
+	VersionID                 string `json:"version_id"`
+}
+
+// voiceSettingsBody sends only the knobs that are actually set; omitted fields
+// keep the voice's own defaults on the ElevenLabs side.
 type voiceSettingsBody struct {
-	Stability       float64 `json:"stability"`
-	SimilarityBoost float64 `json:"similarity_boost"`
-	Style           float64 `json:"style"`
-	UseSpeakerBoost bool    `json:"use_speaker_boost"`
+	Stability       *float64 `json:"stability,omitempty"`
+	SimilarityBoost *float64 `json:"similarity_boost,omitempty"`
+	Style           *float64 `json:"style,omitempty"`
+	UseSpeakerBoost *bool    `json:"use_speaker_boost,omitempty"`
+	Speed           *float64 `json:"speed,omitempty"`
 }
 
 func newTTSRequestBody(req Request) ttsRequestBody {
 	b := ttsRequestBody{Text: req.Text, ModelID: req.ModelID}
-	if req.VoiceSettings != nil {
+	for _, l := range req.DictionaryLocators {
+		b.PronunciationDictionaryLocators = append(b.PronunciationDictionaryLocators,
+			dictLocatorBody{PronunciationDictionaryID: l.ID, VersionID: l.VersionID})
+	}
+	if s := req.VoiceSettings; s != nil {
 		b.VoiceSettings = &voiceSettingsBody{
-			Stability:       req.VoiceSettings.Stability,
-			SimilarityBoost: req.VoiceSettings.SimilarityBoost,
-			Style:           req.VoiceSettings.Style,
-			UseSpeakerBoost: req.VoiceSettings.UseSpeakerBoost,
+			Stability:       s.Stability,
+			SimilarityBoost: s.SimilarityBoost,
+			Style:           s.Style,
+			UseSpeakerBoost: s.UseSpeakerBoost,
+			Speed:           s.Speed,
 		}
 	}
 	return b

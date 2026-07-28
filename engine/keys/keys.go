@@ -27,11 +27,13 @@ func HomePath() (string, error) {
 }
 
 // Resolve looks for the key in the environment first, then in each extra file
-// given (in order), then in ~/.elevenlabs_key.
+// given (in order), then in the system keychain (macOS), then in
+// ~/.elevenlabs_key. The keychain is optional: nothing migrates automatically,
+// and the dotfile keeps working unchanged.
 //
 // An extra file was named explicitly (e.g. -key-file), so failing to read a key
-// from it is a loud error — silently falling through to the home file could
-// spend a different account's credits.
+// from it is a loud error — silently falling through could spend a different
+// account's credits.
 func Resolve(extraFiles ...string) (string, error) {
 	if k := strings.TrimSpace(os.Getenv(EnvVar)); k != "" {
 		return k, nil
@@ -49,12 +51,41 @@ func Resolve(extraFiles ...string) (string, error) {
 		}
 		return k, nil
 	}
+	if k, ok := keychainLookup(); ok {
+		return k, nil
+	}
 	if home, err := HomePath(); err == nil {
 		if k, err := ReadFile(home); err == nil && k != "" {
 			return k, nil
 		}
 	}
 	return "", fmt.Errorf("no ElevenLabs API key found: set $%s, or save one to ~/%s", EnvVar, HomeFile)
+}
+
+// Source reports where Resolve would find the key — for status displays that
+// must never print the key itself. found is false when no key exists.
+func Source(extraFiles ...string) (source string, found bool) {
+	if k := strings.TrimSpace(os.Getenv(EnvVar)); k != "" {
+		return "$" + EnvVar, true
+	}
+	for _, f := range extraFiles {
+		if f == "" {
+			continue
+		}
+		if k, err := ReadFile(f); err == nil && k != "" {
+			return f, true
+		}
+		return "", false // explicit file that doesn't resolve: Resolve errors
+	}
+	if _, ok := keychainLookup(); ok {
+		return "macOS Keychain", true
+	}
+	if home, err := HomePath(); err == nil {
+		if k, err := ReadFile(home); err == nil && k != "" {
+			return home, true
+		}
+	}
+	return "", false
 }
 
 // ReadFile accepts either a bare key or a KEY=VALUE line, so a secrets.env works
@@ -81,9 +112,8 @@ func ReadFile(path string) (string, error) {
 }
 
 // SaveToHome writes the key to ~/.elevenlabs_key with owner-only permissions and
-// returns the path it wrote to.
-//
-// TODO (phase 2): store this in the OS keychain instead of a dotfile.
+// returns the path it wrote to. On macOS, SaveToKeychain (keychain_darwin.go)
+// is the encrypted alternative; the dotfile remains the cross-platform default.
 func SaveToHome(key string) (string, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {

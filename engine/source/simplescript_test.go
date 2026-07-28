@@ -89,3 +89,38 @@ func TestSimpleScriptDuplicateSuffixCannotCollide(t *testing.T) {
 		t.Fatalf("got %d items, want 4", len(items))
 	}
 }
+
+// The speaker variant: "ID | Speaker: text" lines carry a speaker (Player fans
+// out downstream), plain "ID: text" lines stay speaker-less, and both forms mix
+// freely in one file.
+func TestSimpleScriptSpeakerVariant(t *testing.T) {
+	in := "u1 | Toppo: Welcome back.\n" +
+		"u2: Narration with no speaker.\n" +
+		"u3 | Mission Control: Copy: that.\n" +
+		"u4 | Player: On my way.\n"
+	items, err := SimpleScript{}.Parse(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct{ id, speaker, text string }{
+		{"u1", "Toppo", "Welcome back."},
+		{"u2", "", "Narration with no speaker."},
+		{"u3", "Mission Control", "Copy: that."},
+		{"u4", "Player", "On my way."},
+	}
+	if len(items) != len(want) {
+		t.Fatalf("got %d items, want %d", len(items), len(want))
+	}
+	for i, w := range want {
+		if items[i].ID != w.id || items[i].Speaker != w.speaker || items[i].Text != w.text {
+			t.Errorf("item %d = {%q %q %q}, want {%q %q %q}",
+				i, items[i].ID, items[i].Speaker, items[i].Text, w.id, w.speaker, w.text)
+		}
+	}
+	if !items[3].IsPlayer() {
+		t.Error("Player speaker must trigger fan-out")
+	}
+	if !(SimpleScript{}).Detect([]byte(in)) {
+		t.Error("Detect failed on speaker-variant sample")
+	}
+}

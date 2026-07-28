@@ -82,10 +82,14 @@ Both tools call ElevenLabs on your behalf and need an API key:
 1. Sign in at [elevenlabs.io](https://elevenlabs.io).
 2. Open your profile → **API Keys** → create a key and copy it.
 3. Give it to the tool:
-   - **App:** paste it when prompted on first run. It's saved to
-     `~/.elevenlabs_key` (readable only by you).
+   - **App:** paste it when prompted on first run. On macOS, keep the
+     "Store in the macOS Keychain" checkbox on to save it encrypted; otherwise
+     it's saved to `~/.elevenlabs_key` (readable only by you).
    - **CLI:** set `ELEVENLABS_API_KEY` in your environment, or pass
-     `-key-file <path>`, or save it to `~/.elevenlabs_key`.
+     `-key-file <path>`, or save it to `~/.elevenlabs_key`. On macOS,
+     `mhsaudio key -store-keychain` moves it into the Keychain.
+   See [API key storage](USAGE.md#api-key-storage) in USAGE for the full
+   resolution order.
 
 **Never commit or share the key.** Anyone with it can spend the account's credits.
 

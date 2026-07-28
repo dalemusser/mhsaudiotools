@@ -61,12 +61,14 @@ func (c *Config) MergeFrom(imported *Config) (added []Slot) {
 	c.Assignments = imported.Assignments
 	for i := range c.Assignments {
 		a := &c.Assignments[i]
-		if a.Model != "" {
-			continue // the import carried its own choice
-		}
 		for _, old := range prev {
 			if strings.EqualFold(old.Character, a.Character) && old.VoiceID == a.VoiceID {
-				a.Model = old.Model
+				if a.Model == "" {
+					a.Model = old.Model
+				}
+				if a.Settings == nil {
+					a.Settings = old.Settings
+				}
 				break
 			}
 		}

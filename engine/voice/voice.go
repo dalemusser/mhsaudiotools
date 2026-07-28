@@ -12,24 +12,37 @@ import (
 // PlayerCharacter is the speaker name that fans out across player voice slots.
 const PlayerCharacter = "Player"
 
+// Settings are optional per-voice expressiveness knobs, persisted in
+// voices.json and sent with every request that voice renders. Nil fields stay
+// unset, inheriting the voice's own ElevenLabs defaults.
+type Settings struct {
+	Stability       *float64 `json:"stability,omitempty"`
+	SimilarityBoost *float64 `json:"similarityBoost,omitempty"`
+	Style           *float64 `json:"style,omitempty"`
+	SpeakerBoost    *bool    `json:"speakerBoost,omitempty"`
+	Speed           *float64 `json:"speed,omitempty"`
+}
+
 // Assignment binds a (non-player) character to a specific ElevenLabs voice.
 // Model selects which ElevenLabs model renders this voice (empty = the run's
 // default); it's how a config mixes v2 and v3 voices.
 type Assignment struct {
-	Character string `json:"character"`
-	VoiceID   string `json:"voiceId"`
-	VoiceName string `json:"voiceName"`
-	Model     string `json:"model,omitempty"`
+	Character string    `json:"character"`
+	VoiceID   string    `json:"voiceId"`
+	VoiceName string    `json:"voiceName"`
+	Model     string    `json:"model,omitempty"`
+	Settings  *Settings `json:"settings,omitempty"`
 }
 
 // Slot binds a player voice to a fixed, 1-based slot number. Output for a player
 // line is written to "Player<Index>/". The Index→voice binding is persisted so
 // Player1 is always the same voice across regenerations.
 type Slot struct {
-	Index     int    `json:"index"`
-	VoiceID   string `json:"voiceId"`
-	VoiceName string `json:"voiceName"`
-	Model     string `json:"model,omitempty"`
+	Index     int       `json:"index"`
+	VoiceID   string    `json:"voiceId"`
+	VoiceName string    `json:"voiceName"`
+	Model     string    `json:"model,omitempty"`
+	Settings  *Settings `json:"settings,omitempty"`
 }
 
 // Config is the full per-project voicing configuration. Persisted as JSON, it is
@@ -52,6 +65,7 @@ type VoiceRef struct {
 	VoiceID   string
 	VoiceName string
 	Model     string
+	Settings  *Settings // the voice's own knobs; nil = ElevenLabs defaults
 }
 
 // Voicing is the set of voices one line renders with: exactly one for an NPC
@@ -75,15 +89,15 @@ func (c *Config) Resolve(speaker string, isPlayer bool) (Voicing, error) {
 			if s.VoiceID == "" {
 				return Voicing{}, fmt.Errorf("voice: player slot %d has no voice assigned", s.Index)
 			}
-			refs = append(refs, VoiceRef{Slot: s.Index, VoiceID: s.VoiceID, VoiceName: s.VoiceName, Model: s.Model})
+			refs = append(refs, VoiceRef{Slot: s.Index, VoiceID: s.VoiceID, VoiceName: s.VoiceName, Model: s.Model, Settings: s.Settings})
 		}
 		return Voicing{Voices: refs}, nil
 	}
 	if a, ok := c.VoiceFor(speaker); ok && a.VoiceID != "" {
-		return Voicing{Voices: []VoiceRef{{VoiceID: a.VoiceID, VoiceName: a.VoiceName, Model: a.Model}}}, nil
+		return Voicing{Voices: []VoiceRef{{VoiceID: a.VoiceID, VoiceName: a.VoiceName, Model: a.Model, Settings: a.Settings}}}, nil
 	}
 	if c.Default != nil && c.Default.VoiceID != "" {
-		return Voicing{Voices: []VoiceRef{{VoiceID: c.Default.VoiceID, VoiceName: c.Default.VoiceName, Model: c.Default.Model}}}, nil
+		return Voicing{Voices: []VoiceRef{{VoiceID: c.Default.VoiceID, VoiceName: c.Default.VoiceName, Model: c.Default.Model, Settings: c.Default.Settings}}}, nil
 	}
 	if speaker == "" {
 		return Voicing{}, fmt.Errorf("voice: line has no speaker and no default voice is set")

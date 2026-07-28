@@ -22,22 +22,34 @@ const (
 	PCM_44100     AudioFormat = "pcm_44100" // raw samples, written as .pcm (WAV wrapping is phase 2)
 )
 
-// VoiceSettings are the per-request expressiveness knobs.
+// VoiceSettings are the per-request expressiveness knobs. Nil fields stay
+// unset so the voice's own ElevenLabs defaults apply — zero is a real (and
+// extreme) value, not "default".
 type VoiceSettings struct {
-	Stability       float64
-	SimilarityBoost float64
-	Style           float64
-	UseSpeakerBoost bool
+	Stability       *float64
+	SimilarityBoost *float64
+	Style           *float64
+	UseSpeakerBoost *bool
+	Speed           *float64
+}
+
+// DictionaryLocator references a published pronunciation-dictionary version to
+// apply server-side. The request text keeps its original spelling; alignment
+// (and so word timings) map back to it.
+type DictionaryLocator struct {
+	ID        string
+	VersionID string
 }
 
 // Request is a single synthesis request.
 type Request struct {
-	VoiceID        string
-	Text           string
-	ModelID        string
-	Format         AudioFormat
-	WithTimestamps bool
-	VoiceSettings  *VoiceSettings // optional per-line override
+	VoiceID            string
+	Text               string
+	ModelID            string
+	Format             AudioFormat
+	WithTimestamps     bool
+	VoiceSettings      *VoiceSettings      // optional per-line override
+	DictionaryLocators []DictionaryLocator // optional; at most 3 per request
 }
 
 // WordTiming is a word-level timing derived from ElevenLabs character alignment.

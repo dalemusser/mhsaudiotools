@@ -5,6 +5,14 @@ Point it at your dialog (a Dialogue System export or a writer's script), pick th
 voices, and it produces one audio file per line — in the exact folder layout the
 game's Dialogue System expects.
 
+Beyond the basics it handles: incremental re-runs (only new/changed lines are
+regenerated — including after voice, model, or settings changes), mixed
+ElevenLabs **v2/v3** casting with the writers' `(sighs)`-style directions as v3
+emotion tags, server-side **pronunciation** (captions and word timings keep the
+writers' spelling), per-voice **delivery settings** and per-line tweaks, word
+timings for caption sync, the Babylon ceremony player's manifest, and a
+resumable **job history** shared between the app and the CLI.
+
 There are **two tools**, both built from the same core:
 
 | | For whom | What it is |

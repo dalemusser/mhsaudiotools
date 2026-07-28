@@ -29,6 +29,9 @@
              class="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none select-text"/>
       <button id="key-save" class="btn-primary">Save key</button>
     </div>
+    <label id="key-keychain-row" class="check hidden mt-2 text-xs text-amber-200/70">
+      <input id="key-keychain" type="checkbox" checked/> Store in the macOS Keychain (encrypted) instead of the file
+    </label>
   </section>
 
   <!-- Step 1: source -->
@@ -142,6 +145,33 @@
       </div>
     </div>
 
+    <!-- Pronunciation dictionary: server-side, keeps writers' spelling in captions -->
+    <div class="mt-3 text-xs text-slate-500">
+      <label class="check"><input id="pron" type="checkbox" checked/> Fix pronunciation (server dictionary)</label>
+      <p class="mt-1 text-[11px] leading-snug text-slate-500">
+        Words like <code>WAT247</code> are pronounced correctly by an ElevenLabs
+        dictionary while the text — and so captions and word timings — keeps the
+        writers’ spelling. Republishes to the account automatically when rules change.
+      </p>
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        <span class="label">Rules</span>
+        <span id="pron-name" class="text-slate-300">…</span>
+        <button id="edit-pron" class="btn">Edit rules…</button>
+        <button id="pick-pron" class="btn">Choose pronunciations.json…</button>
+        <button id="use-default-pron" class="btn">Use shared file</button>
+      </div>
+    </div>
+
+    <!-- Per-line delivery tweaks: a voice-overrides.json keyed by line ID -->
+    <div class="mt-3 text-xs text-slate-500">
+      <div class="flex flex-wrap items-center gap-2">
+        <span>Line tweaks:</span>
+        <span id="overrides-name" class="text-slate-300">none</span>
+        <button id="pick-overrides" class="btn" title="Per-line stability/style/speed, keyed by line ID">Choose voice-overrides.json…</button>
+        <button id="clear-overrides" class="btn hidden">Clear</button>
+      </div>
+    </div>
+
     <!-- Cleanup profile: which remove/replace rules to apply -->
     <div id="cleanup-block" class="mt-3">
       <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -208,6 +238,12 @@
       <span id="result-note" class="text-xs text-slate-500"></span>
     </div>
     <div id="result-problems" class="hidden mt-3 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200"></div>
+  </section>
+
+  <section id="history-card" class="hidden card">
+    <h2 class="card-title">Recent jobs</h2>
+    <p class="mt-1 text-xs text-slate-500">Runs from this app and the CLI. Resume re-runs a job; only missing or changed files are generated.</p>
+    <ul id="job-list" class="mt-3 space-y-2 text-sm"></ul>
   </section>
 
 </main>
@@ -331,6 +367,38 @@
       <button id="em-save" class="btn-primary">Save</button>
       <button id="em-cancel" class="btn">Cancel</button>
       <span id="em-status" class="text-xs text-slate-500"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Pronunciation editor modal -->
+<div id="pron-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+  <div class="w-full max-w-3xl max-h-[88vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-5">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="card-title">Edit pronunciations <span id="pr-name" class="text-xs font-normal text-slate-500"></span></h2>
+      <button id="pr-add" class="btn">+ Add rule</button>
+    </div>
+    <p class="text-[11px] text-slate-500 mb-3">
+      Say the right-hand text whenever the dialog reads the left-hand word.
+      Applied server-side, so captions and word timings keep the written form.
+      Saving marks the dictionary stale; it republishes automatically on the next run.
+    </p>
+    <div class="grid grid-cols-[1fr_1fr_auto] gap-1 text-[11px] text-slate-500 px-1 mb-1">
+      <span>written (as in dialog)</span><span>spoken as</span><span></span>
+    </div>
+    <div id="pr-rules" class="space-y-1"></div>
+
+    <div class="mt-5">
+      <h3 class="subhead">Test a line</h3>
+      <input id="pr-test-in" class="input-sm w-full mt-1 select-text" placeholder="Paste a line to see what it will sound like…"/>
+      <div class="mt-1 text-xs"><span class="text-slate-500">sounds like </span><span id="pr-test-out" class="text-slate-300 select-text"></span></div>
+    </div>
+
+    <div id="pr-error" class="hidden mt-4 rounded border border-red-800 bg-red-950/40 p-2 text-xs text-red-200"></div>
+    <div class="mt-5 flex items-center gap-3">
+      <button id="pr-save" class="btn-primary">Save</button>
+      <button id="pr-cancel" class="btn">Cancel</button>
+      <span id="pr-status" class="text-xs text-slate-500"></span>
     </div>
   </div>
 </div>

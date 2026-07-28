@@ -8,6 +8,7 @@ import (
 
 	"github.com/dalemusser/mhsaudiotools/engine/emotion"
 	"github.com/dalemusser/mhsaudiotools/engine/keys"
+	"github.com/dalemusser/mhsaudiotools/engine/pron"
 	"github.com/dalemusser/mhsaudiotools/engine/source"
 	"github.com/dalemusser/mhsaudiotools/engine/synth"
 	"github.com/dalemusser/mhsaudiotools/engine/text"
@@ -72,6 +73,28 @@ func loadProfile(path string, disabled bool) (*text.Profile, error) {
 		return text.MHSProfile(), nil
 	}
 	return text.LoadProfile(path)
+}
+
+// loadPronunciations returns the pronunciation set and the file that persists
+// its publish state: an explicit -pronunciations path, else the shared
+// per-user file (seeded with the MHS defaults on first use), else nil when
+// disabled or no config dir exists.
+func loadPronunciations(path string, disabled bool) (*pron.Set, string, error) {
+	if disabled {
+		return nil, "", nil
+	}
+	if path == "" {
+		p, err := pron.DefaultPath()
+		if err != nil {
+			return nil, "", nil // no config dir — run without a dictionary
+		}
+		path = p
+	}
+	s, err := pron.LoadOrDefault(path)
+	if err != nil {
+		return nil, "", err
+	}
+	return s, path, nil
 }
 
 // loadEmotionMap returns the emotion tag map: nil (off), a file, or the built-in

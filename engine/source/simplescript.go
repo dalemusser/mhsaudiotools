@@ -9,17 +9,18 @@ import (
 )
 
 // SimpleScript parses the writer/artist "simple script" format: one spoken line
-// per row as "ID: text", where ID becomes the audio filename. This is the path
-// for dialog that doesn't come from the Dialogue System — a writer's cutscene or
-// lesson script. See prior-apps/audiotools/toppo-lessons-070926.txt.
+// per row, where the ID becomes the audio filename. This is the path for dialog
+// that doesn't come from the Dialogue System — a writer's cutscene or lesson
+// script. See prior-apps/audiotools/toppo-lessons-070926.txt.
 //
-// Speaker is left empty in phase 1: these lines carry no speaker, so the caller
-// supplies a default voice (the prior Python hardcoded "Toppo").
+// Two line forms, freely mixed in one file:
 //
-// TODO (phase 2): a formalized variant that also carries an optional speaker
-// ("ID | Speaker: text") plus a default voice, for multi-character scripts.
+//	ID: text                 speaker-less; voiced by the run's default voice
+//	ID | Speaker: text       multi-character scripts; "Player" fans out across
+//	                         the player voice slots like any other source
 //
-// Ported from prior-apps/audiotools/generate_toppo_lessons.py (parse_lessons).
+// Ported from prior-apps/audiotools/generate_toppo_lessons.py (parse_lessons),
+// extended with the speaker variant.
 type SimpleScript struct{}
 
 // detectScanLimit bounds how many non-blank lines Detect samples.
@@ -47,14 +48,23 @@ func (SimpleScript) Detect(sample []byte) bool {
 	return checked > 0 && matched*100 >= checked*80
 }
 
-// looksLikeEntry reports whether line has the "ID: text" shape, where ID is a
-// single bare token (no whitespace, no comma — distinguishing it from CSV rows
-// and prose).
+// looksLikeEntry reports whether line has the "ID: text" or "ID | Speaker: text"
+// shape, where ID is a single bare token (no whitespace, no comma —
+// distinguishing it from CSV rows and prose). A speaker may contain spaces
+// ("Mission Control") but not a comma.
 func looksLikeEntry(line string) bool {
-	id, text, ok := strings.Cut(line, ":")
-	id = strings.TrimSpace(id)
-	return ok && id != "" && !strings.Contains(id, ",") &&
-		len(strings.Fields(id)) == 1 && strings.TrimSpace(text) != ""
+	head, text, ok := strings.Cut(line, ":")
+	if !ok || strings.TrimSpace(text) == "" {
+		return false
+	}
+	id := strings.TrimSpace(head)
+	if idPart, speaker, has := strings.Cut(id, "|"); has {
+		if strings.TrimSpace(speaker) == "" || strings.Contains(speaker, ",") {
+			return false
+		}
+		id = strings.TrimSpace(idPart)
+	}
+	return id != "" && !strings.Contains(id, ",") && len(strings.Fields(id)) == 1
 }
 
 // Parse emits one LineItem per "ID: text" row. It splits on the first colon
@@ -89,6 +99,10 @@ func (SimpleScript) Parse(r io.Reader) ([]LineItem, error) {
 		}
 		baseID = strings.TrimSpace(baseID)
 		text = strings.TrimSpace(text)
+		speaker := ""
+		if idPart, spPart, has := strings.Cut(baseID, "|"); has {
+			baseID, speaker = strings.TrimSpace(idPart), strings.TrimSpace(spPart)
+		}
 		if baseID == "" || text == "" {
 			continue
 		}
@@ -103,9 +117,10 @@ func (SimpleScript) Parse(r io.Reader) ([]LineItem, error) {
 		used[id] = true
 
 		items = append(items, LineItem{
-			ID:   id,
-			Text: text,
-			Meta: map[string]string{"line": strconv.Itoa(lineno)},
+			ID:      id,
+			Speaker: speaker,
+			Text:    text,
+			Meta:    map[string]string{"line": strconv.Itoa(lineno)},
 		})
 	}
 	if err := sc.Err(); err != nil {

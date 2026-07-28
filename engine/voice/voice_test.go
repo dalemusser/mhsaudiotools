@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -209,5 +210,50 @@ func TestAssignmentsCSVStripsBOM(t *testing.T) {
 	}
 	if len(cfg.Assignments) != 1 || cfg.Assignments[0].Character != "Toppo" {
 		t.Fatalf("BOM broke header detection: %+v", cfg.Assignments)
+	}
+}
+
+func fptr(v float64) *float64 { return &v }
+
+// Settings survive the voices.json round trip and the CSV re-import carry.
+func TestSettingsPersistAndSurviveMerge(t *testing.T) {
+	cfg := &Config{Assignments: []Assignment{
+		{Character: "Toppo", VoiceID: "v-toppo", VoiceName: "Amy",
+			Settings: &Settings{Stability: fptr(0.4), Speed: fptr(1.1)}},
+	}}
+	path := filepath.Join(t.TempDir(), "voices.json")
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := got.Assignments[0].Settings
+	if s == nil || *s.Stability != 0.4 || *s.Speed != 1.1 {
+		t.Fatalf("settings lost in round trip: %+v", s)
+	}
+
+	got.MergeFrom(&Config{Assignments: []Assignment{
+		{Character: "Toppo", VoiceID: "v-toppo", VoiceName: "Amy 2"},
+	}})
+	if got.Assignments[0].Settings == nil {
+		t.Fatal("CSV re-import wiped per-voice settings")
+	}
+}
+
+func TestLoadOverrides(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "voice-overrides.json")
+	data := `{"U1_Toppo_2": {"stability": 0.3, "speed": 1.1}}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o, err := LoadOverrides(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ov := o["U1_Toppo_2"]
+	if ov.Stability == nil || *ov.Stability != 0.3 || ov.Speed == nil || *ov.Speed != 1.1 || ov.Style != nil {
+		t.Fatalf("override parsed wrong: %+v", ov)
 	}
 }

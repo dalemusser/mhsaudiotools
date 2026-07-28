@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/dalemusser/mhsaudiotools/engine/job"
 	"github.com/dalemusser/mhsaudiotools/engine/keys"
 	"github.com/dalemusser/mhsaudiotools/engine/output"
+	"github.com/dalemusser/mhsaudiotools/engine/pron"
 	"github.com/dalemusser/mhsaudiotools/engine/source"
 	"github.com/dalemusser/mhsaudiotools/engine/synth"
 	"github.com/dalemusser/mhsaudiotools/engine/text"
@@ -37,11 +39,23 @@ type App struct {
 	cancel   context.CancelFunc // non-nil while a run is in flight
 	runDone  chan struct{}      // closed when the in-flight Generate returns
 	quitting bool               // a deferred (Windows) close is already in flight
+
+	jobs *job.Store // run history; nil when the config dir is unavailable
 }
 
 func NewApp() *App { return &App{} }
 
-func (a *App) startup(ctx context.Context) { a.ctx = ctx }
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+	// Job history is a convenience: if the config dir is unusable the app runs
+	// without it rather than failing to start.
+	if path, err := job.DefaultStorePath(); err == nil {
+		a.jobs = job.OpenStore(path)
+		// Anything still "running" belongs to a previous process that died —
+		// surface it as interrupted so the UI can offer to resume.
+		_, _ = a.jobs.MarkInterrupted()
+	}
+}
 
 // beforeClose runs when the user closes the window. Wails never cancels the app
 // context on close, so without this a mid-run quit would kill the process
@@ -89,27 +103,29 @@ func (a *App) beforeClose(ctx context.Context) bool {
 
 // Settings is what the UI needs to know at startup.
 type Settings struct {
-	HasKey    bool   `json:"hasKey"`
-	KeySource string `json:"keySource"`
+	HasKey            bool   `json:"hasKey"`
+	KeySource         string `json:"keySource"`
+	KeychainAvailable bool   `json:"keychainAvailable"`
 }
 
 // GetSettings reports whether a key is already available and where it came from,
 // so the UI doesn't nag someone who already has one configured.
 func (a *App) GetSettings() Settings {
-	if k := strings.TrimSpace(os.Getenv(keys.EnvVar)); k != "" {
-		return Settings{HasKey: true, KeySource: "$" + keys.EnvVar}
-	}
-	if path, err := keys.HomePath(); err == nil {
-		if k, err := keys.ReadFile(path); err == nil && k != "" {
-			return Settings{HasKey: true, KeySource: path}
-		}
-	}
-	return Settings{}
+	src, found := keys.Source()
+	return Settings{HasKey: found, KeySource: src, KeychainAvailable: keys.KeychainSupported()}
 }
 
-// SaveKey stores the key in the user's home directory (owner-only) and returns
-// the path, so it's visible where it went rather than hidden.
-func (a *App) SaveKey(key string) (string, error) { return keys.SaveToHome(key) }
+// SaveKey stores the key — in the macOS Keychain when asked (and available),
+// else in the owner-only home dotfile — and returns where it went.
+func (a *App) SaveKey(key string, useKeychain bool) (string, error) {
+	if useKeychain && keys.KeychainSupported() {
+		if err := keys.SaveToKeychain(key); err != nil {
+			return "", err
+		}
+		return "the macOS Keychain", nil
+	}
+	return keys.SaveToHome(key)
+}
 
 // AccountInfo describes the account behind the key.
 type AccountInfo struct {
@@ -267,7 +283,7 @@ const previewSample = "Good morning, cadets. This is a voice preview."
 // PreviewVoice synthesizes a short sample in the given voice and model, returning
 // it as a base64 audio data URI the UI can play — so an artist can hear a voice
 // (and audition v2 vs v3) before committing. An empty model uses v2.
-func (a *App) PreviewVoice(voiceID, sample, model string) (string, error) {
+func (a *App) PreviewVoice(voiceID, sample, model string, settings *voice.Settings) (string, error) {
 	if voiceID == "" {
 		return "", fmt.Errorf("pick a voice to preview")
 	}
@@ -278,11 +294,23 @@ func (a *App) PreviewVoice(voiceID, sample, model string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The audition must sound like the run will: same settings resolution.
+	var vs *synth.VoiceSettings
+	if settings != nil {
+		vs = &synth.VoiceSettings{
+			Stability:       settings.Stability,
+			SimilarityBoost: settings.SimilarityBoost,
+			Style:           settings.Style,
+			UseSpeakerBoost: settings.SpeakerBoost,
+			Speed:           settings.Speed,
+		}
+	}
 	res, err := synth.NewElevenLabs(key).Synthesize(a.ctx, synth.Request{
-		VoiceID: voiceID,
-		Text:    sample,
-		ModelID: model,
-		Format:  synth.MP3_44100_128,
+		VoiceID:       voiceID,
+		Text:          sample,
+		ModelID:       model,
+		Format:        synth.MP3_44100_128,
+		VoiceSettings: vs,
 	})
 	if err != nil {
 		return "", err
@@ -591,6 +619,150 @@ func (a *App) PickEmotionFile() (*EmotionInfo, error) {
 	return emotionInfo(path, m, false), nil
 }
 
+// --- pronunciations ----------------------------------------------------------
+
+// PronRuleDTO is one written→spoken alias for the editor.
+type PronRuleDTO struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// PronDTO mirrors pron.Set's rules as an ordered list for editing.
+type PronDTO struct {
+	Name  string        `json:"name"`
+	Rules []PronRuleDTO `json:"rules"`
+}
+
+// PronInfo summarizes the pronunciation set for display.
+type PronInfo struct {
+	Path      string `json:"path"`
+	Name      string `json:"name"`
+	Rules     int    `json:"rules"`
+	Published bool   `json:"published"`
+}
+
+func pronInfo(path string, s *pron.Set) *PronInfo {
+	return &PronInfo{Path: path, Name: s.Name, Rules: len(s.Rules), Published: !s.NeedsPublish()}
+}
+
+func pronSetPath(path string) (string, error) {
+	if path != "" {
+		return path, nil
+	}
+	return pron.DefaultPath()
+}
+
+// PronunciationInfo summarizes the set at path ("" = the shared per-user file).
+func (a *App) PronunciationInfo(path string) (*PronInfo, error) {
+	p, err := pronSetPath(path)
+	if err != nil {
+		return nil, err
+	}
+	s, err := pron.LoadOrDefault(p)
+	if err != nil {
+		return nil, err
+	}
+	return pronInfo(p, s), nil
+}
+
+// PronunciationRules returns the editable written→spoken rows, sorted.
+func (a *App) PronunciationRules(path string) (*PronDTO, error) {
+	p, err := pronSetPath(path)
+	if err != nil {
+		return nil, err
+	}
+	s, err := pron.LoadOrDefault(p)
+	if err != nil {
+		return nil, err
+	}
+	dto := &PronDTO{Name: s.Name}
+	for _, r := range s.SortedRules() {
+		dto.Rules = append(dto.Rules, PronRuleDTO{From: r.From, To: r.To})
+	}
+	return dto, nil
+}
+
+// SavePronunciations writes the rows to the file ("" = the shared per-user
+// file), preserving the publish state so drift is detected and the dictionary
+// is republished on the next run.
+func (a *App) SavePronunciations(path string, dto PronDTO) (*PronInfo, error) {
+	p, err := pronSetPath(path)
+	if err != nil {
+		return nil, err
+	}
+	s, err := pron.LoadOrDefault(p)
+	if err != nil {
+		return nil, err
+	}
+	s.Name = strings.TrimSpace(dto.Name)
+	if s.Name == "" {
+		s.Name = "mhs-pronunciations"
+	}
+	s.Rules = map[string]string{}
+	for _, r := range dto.Rules {
+		from, to := strings.TrimSpace(r.From), strings.TrimSpace(r.To)
+		if from == "" || to == "" {
+			continue
+		}
+		s.Rules[from] = to
+	}
+	if err := s.Save(p); err != nil {
+		return nil, err
+	}
+	return pronInfo(p, s), nil
+}
+
+// TestPronunciations shows what a sample line will sound like under the rules
+// (client-side approximation of the server's alias matching).
+func (a *App) TestPronunciations(dto PronDTO, sample string) (string, error) {
+	out := sample
+	for _, r := range dto.Rules {
+		if r.From != "" && r.To != "" {
+			out = strings.ReplaceAll(out, r.From, r.To)
+		}
+	}
+	return out, nil
+}
+
+// PickPronunciationsFile chooses a custom pronunciations.json.
+func (a *App) PickPronunciationsFile() (*PronInfo, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:   "Choose a pronunciations.json",
+		Filters: []runtime.FileFilter{{DisplayName: "Pronunciations (*.json)", Pattern: "*.json"}},
+	})
+	if err != nil || path == "" {
+		return nil, err
+	}
+	s, err := pron.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	return pronInfo(path, s), nil
+}
+
+// OverridesInfo summarizes a picked voice-overrides file.
+type OverridesInfo struct {
+	Path  string `json:"path"`
+	Count int    `json:"count"`
+}
+
+// PickVoiceOverridesFile opens a dialog for a voice-overrides.json (per-line
+// delivery tweaks keyed by line ID) and validates it before accepting.
+func (a *App) PickVoiceOverridesFile() (*OverridesInfo, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:   "Choose a voice-overrides.json",
+		Filters: []runtime.FileFilter{{DisplayName: "Voice overrides (*.json)", Pattern: "*.json"}},
+	})
+	if err != nil || path == "" {
+		return nil, err
+	}
+	o, err := voice.LoadOverrides(path)
+	if err != nil {
+		return nil, err
+	}
+	return &OverridesInfo{Path: path, Count: len(o)}, nil
+}
+
 // ExportDefaultEmotion writes the built-in emotion map to a file to edit and
 // share, then selects it.
 func (a *App) ExportDefaultEmotion() (*EmotionInfo, error) {
@@ -645,6 +817,28 @@ type Request struct {
 	Emotion        bool   `json:"emotion"`     // apply v3 audio tags to v3 voices
 	EmotionPath    string `json:"emotionPath"` // custom emotions.json; empty = built-in defaults
 	DefaultSpeaker string `json:"defaultSpeaker"`
+
+	// VoiceOverridesPath is an optional voice-overrides.json: per-line delivery
+	// tweaks (stability/style/speed) keyed by line ID.
+	VoiceOverridesPath string `json:"voiceOverridesPath"`
+
+	// Pronunciations applies the server-side pronunciation dictionary (text
+	// keeps the writers' spelling; timings/captions align to it). Path "" uses
+	// the shared per-user pronunciations file.
+	Pronunciations     bool   `json:"pronunciations"`
+	PronunciationsPath string `json:"pronunciationsPath"`
+}
+
+// pronPathFor resolves which pronunciations file a request uses.
+func pronPathFor(req Request) string {
+	if req.PronunciationsPath != "" {
+		return req.PronunciationsPath
+	}
+	p, err := pron.DefaultPath()
+	if err != nil {
+		return ""
+	}
+	return p
 }
 
 // VoiceCount is a per-voice tally for the preview.
@@ -759,11 +953,19 @@ func (a *App) Generate(req Request) (*RunSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	runner.Client = synth.NewElevenLabs(key)
-	runner.OnProgress = func(p job.Progress) {
-		runtime.EventsEmit(a.ctx, "progress", map[string]int{
-			"total": p.Total, "done": p.Done, "failed": p.Failed,
-		})
+	client := synth.NewElevenLabs(key)
+	runner.Client = client
+
+	// The dictionary must exist server-side before any request references it.
+	if runner.Pronunciations.Active() && runner.Pronunciations.NeedsPublish() {
+		if err := pron.Publish(a.ctx, client, runner.Pronunciations); err != nil {
+			return nil, err
+		}
+		if p := pronPathFor(req); p != "" {
+			if err := runner.Pronunciations.Save(p); err != nil {
+				return nil, fmt.Errorf("saving pronunciations state: %w", err)
+			}
+		}
 	}
 
 	ctx, cancel := context.WithCancel(a.ctx)
@@ -787,8 +989,40 @@ func (a *App) Generate(req Request) (*RunSummary, error) {
 		close(done)
 	}()
 
+	// Record the run in the shared history so it survives a restart: created as
+	// "running", updated with throttled progress (so an interrupted record
+	// shows how far it got), finalized below. The stored Request is what Resume
+	// replays.
+	var rec job.Record
+	if a.jobs != nil {
+		reqJSON, _ := json.Marshal(req)
+		rec = job.Record{
+			ID: job.NewID(time.Now()), Created: time.Now(),
+			Status: job.StatusRunning, Shell: "app",
+			Source: req.SourcePath, OutputDir: req.OutputDir, Layout: req.Layout,
+			Request: reqJSON,
+		}
+		_ = a.jobs.Put(rec)
+	}
+	var lastPersist time.Time
+	runner.OnProgress = func(p job.Progress) {
+		runtime.EventsEmit(a.ctx, "progress", map[string]int{
+			"total": p.Total, "done": p.Done, "failed": p.Failed,
+		})
+		// OnProgress is serialized by the runner, so this is race-free.
+		if a.jobs != nil && time.Since(lastPersist) > 5*time.Second {
+			lastPersist = time.Now()
+			rec.Targets, rec.Done, rec.Failed = p.Total, p.Done, p.Failed
+			_ = a.jobs.Put(rec)
+		}
+	}
+
 	res, runErr := runner.Run(ctx, lines)
 	if res == nil {
+		if a.jobs != nil {
+			rec.Status, rec.Error = job.StatusFailed, runErr.Error()
+			_ = a.jobs.Put(rec)
+		}
 		return nil, runErr
 	}
 
@@ -796,6 +1030,20 @@ func (a *App) Generate(req Request) (*RunSummary, error) {
 	// instant — a Cancel click racing normal completion (or a real failure)
 	// must not relabel the run and swallow its error.
 	canceled := errors.Is(runErr, context.Canceled) || (runErr == nil && ctx.Err() != nil)
+
+	if a.jobs != nil {
+		rec.Targets, rec.Written, rec.Failed = res.Targets, res.Written, res.Failed
+		rec.Done = res.Written + res.Failed
+		switch {
+		case canceled:
+			rec.Status = job.StatusCanceled
+		case runErr != nil:
+			rec.Status, rec.Error = job.StatusFailed, runErr.Error()
+		default:
+			rec.Status = job.StatusCompleted
+		}
+		_ = a.jobs.Put(rec)
+	}
 	sum := &RunSummary{
 		Written:      res.Written,
 		UpToDate:     res.SkippedFiles,
@@ -819,6 +1067,23 @@ func (a *App) Generate(req Request) (*RunSummary, error) {
 		sum.Problems = append([]string{"run error: " + runErr.Error()}, sum.Problems...)
 	}
 	return sum, nil
+}
+
+// ListJobs returns the run history, newest first. Records carry the original
+// Request, which the frontend replays to resume a job.
+func (a *App) ListJobs() ([]job.Record, error) {
+	if a.jobs == nil {
+		return nil, nil
+	}
+	return a.jobs.List()
+}
+
+// DeleteJob removes one record from the history.
+func (a *App) DeleteJob(id string) error {
+	if a.jobs == nil {
+		return nil
+	}
+	return a.jobs.Delete(id)
 }
 
 // Cancel stops a run in progress. Files already written stay, and the manifest
@@ -926,6 +1191,26 @@ func (a *App) build(req Request) (*job.Runner, []source.LineItem, string, error)
 		}
 	}
 
+	var overrides voice.Overrides
+	if req.VoiceOverridesPath != "" {
+		o, err := voice.LoadOverrides(req.VoiceOverridesPath)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("voice overrides: %w", err)
+		}
+		overrides = o
+	}
+
+	var prons *pron.Set
+	if req.Pronunciations {
+		if p := pronPathFor(req); p != "" {
+			s, err := pron.LoadOrDefault(p)
+			if err != nil {
+				return nil, nil, "", fmt.Errorf("pronunciations: %w", err)
+			}
+			prons = s
+		}
+	}
+
 	layout, err := pickLayout(req.Layout)
 	if err != nil {
 		return nil, nil, "", err
@@ -936,10 +1221,12 @@ func (a *App) build(req Request) (*job.Runner, []source.LineItem, string, error)
 	}
 
 	return &job.Runner{
-		Cleanup: profile,
-		Voices:  cfg,
-		Layout:  layout,
-		Emotion: emo,
+		Cleanup:        profile,
+		Overrides:      overrides,
+		Pronunciations: prons,
+		Voices:         cfg,
+		Layout:         layout,
+		Emotion:        emo,
 		Options: job.Options{
 			OutputDir:      req.OutputDir,
 			Format:         synth.AudioFormat(format),

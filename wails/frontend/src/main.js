@@ -57,6 +57,8 @@ const esc = (s) =>
 // --- startup ----------------------------------------------------------------
 
 async function init() {
+  loadJobs(); // history needs no key; also surfaces an interrupted run to resume
+  loadPronInfo(); // pronunciation rules need no key either
   try {
     // Cleanup + emotion maps need no key — show the built-in defaults up front.
     try {
@@ -67,6 +69,7 @@ async function init() {
     }
 
     const s = await app().GetSettings();
+    $("key-keychain-row").classList.toggle("hidden", !s.keychainAvailable);
     if (!s.hasKey) {
       $("key-card").classList.remove("hidden");
       $("account").textContent = "no API key";
@@ -195,7 +198,8 @@ $("key-save").onclick = async () => {
   if (!key) return;
   $("key-save").disabled = true;
   try {
-    const path = await app().SaveKey(key);
+    const useKeychain = !$("key-keychain-row").classList.contains("hidden") && $("key-keychain").checked;
+    const path = await app().SaveKey(key, useKeychain);
     // Prove the key actually works before hiding the card — a mistyped key
     // that only fails at Generate time is a miserable way to find out. The
     // failure could equally be a network blip, so say so; the key IS saved
@@ -245,8 +249,179 @@ function request() {
     emotion: $("emotion").checked,
     emotionPath: state.emotionPath,
     defaultSpeaker: $("default-speaker").value.trim(),
+    voiceOverridesPath: state.voiceOverridesPath || "",
+    pronunciations: $("pron").checked,
+    pronunciationsPath: state.pronPath || "",
   };
 }
+
+// --- pronunciations ----------------------------------------------------------
+
+const pr = { name: "mhs-pronunciations" };
+
+function renderPronInfo(info) {
+  if (!info) return;
+  const base = (info.path || "").split(/[\\/]/).pop() || "shared file";
+  const stale = info.published ? "" : ", republish pending";
+  $("pron-name").textContent = `${base} (${info.rules} rule${info.rules === 1 ? "" : "s"}${stale})`;
+  $("pron-name").title = info.path || "";
+}
+
+async function loadPronInfo() {
+  try {
+    renderPronInfo(await app().PronunciationInfo(state.pronPath || ""));
+  } catch (e) {
+    $("pron-name").textContent = "unavailable";
+  }
+}
+
+function prRuleRow(from, to) {
+  return `<div class="pr-row grid grid-cols-[1fr_1fr_auto] gap-1">
+      <input class="pr-from input-sm select-text" placeholder="WAT247" value="${esc(from || "")}"/>
+      <input class="pr-to input-sm select-text" placeholder="Watt 2 4 7" value="${esc(to || "")}"/>
+      <button class="pr-del btn" title="Remove">✕</button>
+    </div>`;
+}
+
+function prRender(rules) {
+  $("pr-rules").innerHTML = rules.map((r) => prRuleRow(r.from, r.to)).join("");
+}
+
+function prScrape() {
+  return [...$("pr-rules").querySelectorAll(".pr-row")].map((row) => ({
+    from: row.querySelector(".pr-from").value,
+    to: row.querySelector(".pr-to").value,
+  }));
+}
+
+function prError(msg) {
+  const el = $("pr-error");
+  el.textContent = msg || "";
+  el.classList.toggle("hidden", !msg);
+}
+
+async function openPronEditor() {
+  prError("");
+  prTestSeq++;
+  $("pr-status").textContent = "";
+  $("pr-test-out").textContent = "";
+  $("pr-test-in").value = "";
+  try {
+    const dto = await app().PronunciationRules(state.pronPath || "");
+    pr.name = dto.name || "mhs-pronunciations";
+    $("pr-name").textContent = state.pronPath || "(shared file)";
+    prRender(dto.rules || []);
+    $("pron-modal").classList.remove("hidden");
+  } catch (e) {
+    showError(e);
+  }
+}
+
+function closePronEditor() {
+  $("pron-modal").classList.add("hidden");
+}
+
+$("edit-pron").onclick = openPronEditor;
+$("pr-cancel").onclick = closePronEditor;
+$("pr-add").onclick = () => {
+  const rules = prScrape();
+  rules.push({ from: "", to: "" });
+  prRender(rules);
+};
+$("pr-rules").addEventListener("click", (e) => {
+  const btn = e.target.closest(".pr-del");
+  if (!btn) return;
+  const rows = [...$("pr-rules").querySelectorAll(".pr-row")];
+  const i = rows.indexOf(btn.closest(".pr-row"));
+  const rules = prScrape();
+  rules.splice(i, 1);
+  prRender(rules);
+});
+
+let prTestSeq = 0;
+$("pr-test-in").oninput = async () => {
+  const sample = $("pr-test-in").value;
+  const seq = ++prTestSeq;
+  if (!sample) {
+    $("pr-test-out").textContent = "";
+    return;
+  }
+  try {
+    const out = await app().TestPronunciations({ name: pr.name, rules: prScrape() }, sample);
+    if (seq !== prTestSeq) return;
+    $("pr-test-out").textContent = out;
+  } catch (e) {
+    if (seq !== prTestSeq) return;
+    $("pr-test-out").textContent = String(e?.message || e);
+  }
+};
+
+$("pr-save").onclick = async () => {
+  prError("");
+  const rows = prScrape();
+  const kept = rows.filter((r) => r.from.trim() && r.to.trim());
+  const seen = new Set();
+  let dups = 0;
+  for (const r of kept) {
+    const k = r.from.trim();
+    if (seen.has(k)) dups++;
+    seen.add(k);
+  }
+  const dropped = rows.length - kept.length;
+  try {
+    const info = await app().SavePronunciations(state.pronPath || "", { name: pr.name, rules: rows });
+    if (!info) return;
+    renderPronInfo(info);
+    closePronEditor();
+    const notes = [];
+    if (dropped) notes.push(`${dropped} incomplete row(s) skipped`);
+    if (dups) notes.push(`${dups} duplicate word(s) collapsed`);
+    notes.push("republishes on next run");
+    setStatus(`pronunciations saved (${notes.join(", ")})`);
+  } catch (e) {
+    prError(String(e?.message || e));
+  }
+};
+
+$("pick-pron").onclick = async () => {
+  try {
+    const info = await app().PickPronunciationsFile();
+    if (!info) return; // dialog canceled
+    state.pronPath = info.path;
+    renderPronInfo(info);
+    clearError();
+  } catch (e) {
+    showError(e);
+  }
+};
+
+$("use-default-pron").onclick = () => {
+  state.pronPath = "";
+  loadPronInfo();
+};
+
+// --- per-line voice overrides ------------------------------------------------
+
+$("pick-overrides").onclick = async () => {
+  try {
+    const info = await app().PickVoiceOverridesFile();
+    if (!info) return; // dialog canceled
+    state.voiceOverridesPath = info.path;
+    $("overrides-name").textContent = `${info.path.split(/[\\/]/).pop()} (${info.count} line${info.count === 1 ? "" : "s"})`;
+    $("overrides-name").title = info.path;
+    $("clear-overrides").classList.remove("hidden");
+    clearError();
+  } catch (e) {
+    showError(e);
+  }
+};
+
+$("clear-overrides").onclick = () => {
+  state.voiceOverridesPath = "";
+  $("overrides-name").textContent = "none";
+  $("overrides-name").title = "";
+  $("clear-overrides").classList.add("hidden");
+};
 
 // --- cleanup profile --------------------------------------------------------
 
@@ -419,6 +594,7 @@ $("generate").onclick = async () => {
   } finally {
     setRunning(false);
     $("progress-card").classList.add("hidden");
+    loadJobs(); // the run just changed the history
   }
 };
 
@@ -467,6 +643,120 @@ $("reveal").onclick = async () => {
   }
 };
 
+// --- job history ------------------------------------------------------------
+
+let jobCache = [];
+
+function jobStatus(s) {
+  const cls =
+    s === "completed" ? "text-emerald-400"
+    : s === "running" ? "text-sky-400"
+    : s === "interrupted" ? "text-amber-400"
+    : s === "failed" ? "text-red-400"
+    : "text-slate-400";
+  return `<span class="${cls}">${esc(s)}</span>`;
+}
+
+async function loadJobs() {
+  let jobs = [];
+  try {
+    jobs = (await app().ListJobs()) || [];
+  } catch (e) {
+    // History is a convenience; a missing store just hides the card.
+  }
+  jobCache = jobs;
+  $("history-card").classList.toggle("hidden", jobs.length === 0);
+  $("job-list").innerHTML = jobs
+    .map((j, i) => {
+      const src = (j.source || "").split(/[\\/]/).pop();
+      const when = new Date(j.created).toLocaleString();
+      const counts = j.targets
+        ? `${commas(j.written || 0)}/${commas(j.targets)} written${j.failed ? `, ${commas(j.failed)} failed` : ""}`
+        : "";
+      const label = j.status === "interrupted" || j.status === "canceled" ? "Resume" : "Run again";
+      const resume = j.request && j.status !== "running"
+        ? `<button class="btn job-resume" data-i="${i}">${label}</button>` : "";
+      return `<li class="flex items-center gap-3 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2">
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-slate-300">${esc(src)} <span class="text-slate-600">→</span> ${esc(j.outputDir)}</div>
+          <div class="truncate text-xs text-slate-500">${jobStatus(j.status)} · ${esc(when)}${counts ? " · " + esc(counts) : ""}${j.error ? " · " + esc(j.error) : ""}</div>
+        </div>
+        ${resume}
+        <button class="btn job-open" data-i="${i}" title="Open output folder">Open</button>
+        <button class="job-del px-1 text-slate-600 hover:text-red-400" data-i="${i}" title="Remove from history">✕</button>
+      </li>`;
+    })
+    .join("");
+}
+
+$("job-list").onclick = async (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  const j = jobCache[Number(btn.dataset.i)];
+  if (!j) return;
+  if (btn.classList.contains("job-del")) {
+    try {
+      await app().DeleteJob(j.id);
+    } catch (err) {
+      showError(err);
+    }
+    loadJobs();
+  } else if (btn.classList.contains("job-open")) {
+    try {
+      await app().RevealOutput(j.outputDir);
+    } catch (err) {
+      showError(err);
+    }
+  } else if (btn.classList.contains("job-resume")) {
+    if (state.running) return;
+    await applyRequestToForm(j.request);
+    $("generate").onclick();
+  }
+};
+
+// applyRequestToForm puts a recorded job's request back into the form, so the
+// visible state matches what Resume is about to run.
+async function applyRequestToForm(req) {
+  state.sourcePath = req.sourcePath || "";
+  $("source-path").textContent = state.sourcePath || "No file chosen";
+  $("source-path").title = state.sourcePath;
+  $("source-format").value = req.sourceFormat || "auto";
+
+  state.outputDir = req.outputDir || "";
+  $("out-path").textContent = state.outputDir || "No folder chosen";
+  $("out-path").title = state.outputDir;
+
+  $("layout").value = req.layout || "dialog-system";
+  $("format").value = req.format || "mp3_44100_128";
+  $("timestamps").checked = !!req.timestamps;
+  $("force").checked = !!req.force;
+  $("cleanup").checked = !!req.cleanup;
+  state.cleanupPath = req.cleanupPath || "";
+  $("emotion").checked = !!req.emotion;
+  state.emotionPath = req.emotionPath || "";
+  $("default-speaker").value = req.defaultSpeaker || "";
+  state.voiceOverridesPath = req.voiceOverridesPath || "";
+  $("overrides-name").textContent = state.voiceOverridesPath
+    ? state.voiceOverridesPath.split(/[\\/]/).pop() : "none";
+  $("overrides-name").title = state.voiceOverridesPath;
+  $("clear-overrides").classList.toggle("hidden", !state.voiceOverridesPath);
+  $("pron").checked = !!req.pronunciations;
+  state.pronPath = req.pronunciationsPath || "";
+  loadPronInfo();
+
+  if (req.voicesPath) {
+    try {
+      renderVoices(await app().LoadVoices(req.voicesPath));
+    } catch (e) {
+      // The voices file may have moved; keep the path so the error is visible
+      // on Generate rather than silently running voiceless.
+      state.voicesPath = req.voicesPath;
+      $("voices-path").textContent = req.voicesPath;
+      $("voices-path").title = req.voicesPath;
+    }
+  }
+}
+
 // --- voice editor -----------------------------------------------------------
 //
 // DOM-driven: rows are the source of truth, scraped on save. A scrape→render
@@ -507,24 +797,76 @@ function veVoiceOptions(selectedId) {
   return html;
 }
 
-function veCharRow(character, voiceId, model) {
-  return `<div class="ve-row flex items-center gap-2">
-      <input class="ve-name input-sm flex-1" placeholder="Character" value="${esc(character || "")}"/>
-      <select class="ve-voice input-sm flex-1">${veVoiceOptions(voiceId || "")}</select>
-      ${veModelSelect(model)}
-      <button class="ve-play btn" title="Preview voice on its model">▶</button>
-      <button class="ve-del btn" title="Remove">✕</button>
+// veSettingsPanel renders the per-voice delivery knobs. Blank = unset — the
+// voice's own ElevenLabs defaults apply; only filled-in values are sent.
+function veSettingsPanel(s) {
+  s = s || {};
+  const num = (v) => (v === undefined || v === null ? "" : String(v));
+  const knob = (key, label, val, min, max) =>
+    `<label class="flex items-center justify-between gap-2">${label}
+       <input type="number" class="ve-set-${key} input-sm w-20" min="${min}" max="${max}" step="0.05" value="${esc(val)}" placeholder="default"/>
+     </label>`;
+  const boost = s.speakerBoost === undefined || s.speakerBoost === null ? "" : String(s.speakerBoost);
+  return `<div class="ve-settings hidden ml-4 mt-1 grid grid-cols-2 gap-x-6 gap-y-1 rounded border border-slate-800 bg-slate-900/60 p-2 text-xs text-slate-400">
+      ${knob("stability", "Stability", num(s.stability), 0, 1)}
+      ${knob("style", "Style", num(s.style), 0, 1)}
+      ${knob("similarityBoost", "Similarity", num(s.similarityBoost), 0, 1)}
+      ${knob("speed", "Speed", num(s.speed), 0.7, 1.2)}
+      <label class="flex items-center justify-between gap-2">Speaker boost
+        <select class="ve-set-speakerBoost input-sm w-20">
+          <option value="">default</option>
+          <option value="true"${boost === "true" ? " selected" : ""}>on</option>
+          <option value="false"${boost === "false" ? " selected" : ""}>off</option>
+        </select>
+      </label>
+      <button class="ve-set-clear justify-self-end text-slate-600 hover:text-slate-300" title="Clear all — use the voice's ElevenLabs defaults">reset</button>
     </div>`;
 }
 
-function veSlotRow(n, voiceId, model) {
-  return `<div class="ve-row flex items-center gap-2">
-      <span class="ve-slot-label w-16 text-xs text-slate-400">Player${n}</span>
-      <select class="ve-voice input-sm flex-1">${veVoiceOptions(voiceId || "")}</select>
-      ${veModelSelect(model)}
-      <button class="ve-play btn" title="Preview voice on its model">▶</button>
-      <button class="ve-del btn" title="Remove">✕</button>
+function veGear(s) {
+  return `<button class="ve-gear btn${s ? " text-sky-400" : ""}" title="Voice settings (stability, style, speed…)">⚙</button>`;
+}
+
+function veCharRow(character, voiceId, model, settings) {
+  return `<div class="ve-row">
+      <div class="flex items-center gap-2">
+        <input class="ve-name input-sm flex-1" placeholder="Character" value="${esc(character || "")}"/>
+        <select class="ve-voice input-sm flex-1">${veVoiceOptions(voiceId || "")}</select>
+        ${veModelSelect(model)}
+        ${veGear(settings)}
+        <button class="ve-play btn" title="Preview voice with its model and settings">▶</button>
+        <button class="ve-del btn" title="Remove">✕</button>
+      </div>
+      ${veSettingsPanel(settings)}
     </div>`;
+}
+
+function veSlotRow(n, voiceId, model, settings) {
+  return `<div class="ve-row">
+      <div class="flex items-center gap-2">
+        <span class="ve-slot-label w-16 text-xs text-slate-400">Player${n}</span>
+        <select class="ve-voice input-sm flex-1">${veVoiceOptions(voiceId || "")}</select>
+        ${veModelSelect(model)}
+        ${veGear(settings)}
+        <button class="ve-play btn" title="Preview voice with its model and settings">▶</button>
+        <button class="ve-del btn" title="Remove">✕</button>
+      </div>
+      ${veSettingsPanel(settings)}
+    </div>`;
+}
+
+// veScrapeSettings reads a row's knobs; null when everything is at default.
+function veScrapeSettings(row) {
+  const s = {};
+  for (const key of ["stability", "style", "similarityBoost", "speed"]) {
+    const raw = row.querySelector(".ve-set-" + key).value.trim();
+    if (raw === "") continue;
+    const v = Number(raw);
+    if (!Number.isNaN(v)) s[key] = v;
+  }
+  const b = row.querySelector(".ve-set-speakerBoost").value;
+  if (b) s.speakerBoost = b === "true";
+  return Object.keys(s).length ? s : null;
 }
 
 // Audio preview: synthesize the sample line in a row's voice and play it. Only
@@ -543,7 +885,8 @@ async function vePreview(row, btn) {
   btn.textContent = "…";
   btn.disabled = true;
   try {
-    const uri = await app().PreviewVoice(voiceId, $("ve-sample").value, model);
+    // Audition with the row's settings so it sounds like the run will.
+    const uri = await app().PreviewVoice(voiceId, $("ve-sample").value, model, veScrapeSettings(row));
     if (vePlayer) vePlayer.pause();
     vePlayer = new Audio(uri);
     await vePlayer.play();
@@ -557,9 +900,30 @@ async function vePreview(row, btn) {
 
 function vePlayHandler(container) {
   container.addEventListener("click", (e) => {
+    const gear = e.target.closest(".ve-gear");
+    if (gear) {
+      gear.closest(".ve-row").querySelector(".ve-settings").classList.toggle("hidden");
+      return;
+    }
+    const clear = e.target.closest(".ve-set-clear");
+    if (clear) {
+      const row = clear.closest(".ve-row");
+      for (const key of ["stability", "style", "similarityBoost", "speed"]) {
+        row.querySelector(".ve-set-" + key).value = "";
+      }
+      row.querySelector(".ve-set-speakerBoost").value = "";
+      row.querySelector(".ve-gear").classList.remove("text-sky-400");
+      return;
+    }
     const btn = e.target.closest(".ve-play");
     if (!btn) return;
     vePreview(btn.closest(".ve-row"), btn);
+  });
+  // Keep the gear's active tint in sync as knobs change.
+  container.addEventListener("input", (e) => {
+    const row = e.target.closest(".ve-row");
+    if (!row || !e.target.className.includes("ve-set-")) return;
+    row.querySelector(".ve-gear").classList.toggle("text-sky-400", !!veScrapeSettings(row));
   });
 }
 vePlayHandler($("ve-chars"));
@@ -571,17 +935,19 @@ function veScrape() {
     character: row.querySelector(".ve-name").value.trim(),
     voiceId: row.querySelector(".ve-voice").value,
     model: row.querySelector(".ve-model").value,
+    settings: veScrapeSettings(row),
   }));
   const slots = [...$("ve-slots").querySelectorAll(".ve-row")].map((row) => ({
     voiceId: row.querySelector(".ve-voice").value,
     model: row.querySelector(".ve-model").value,
+    settings: veScrapeSettings(row),
   }));
   return { chars, slots };
 }
 
 function veRender(data) {
-  $("ve-chars").innerHTML = data.chars.map((c) => veCharRow(c.character, c.voiceId, c.model)).join("");
-  $("ve-slots").innerHTML = data.slots.map((s, i) => veSlotRow(i + 1, s.voiceId, s.model)).join("");
+  $("ve-chars").innerHTML = data.chars.map((c) => veCharRow(c.character, c.voiceId, c.model, c.settings)).join("");
+  $("ve-slots").innerHTML = data.slots.map((s, i) => veSlotRow(i + 1, s.voiceId, s.model, s.settings)).join("");
 }
 
 function veRenumberSlots() {
@@ -684,11 +1050,11 @@ $("ve-save").onclick = async () => {
   const d = veScrape();
   const assignments = d.chars
     .filter((c) => c.character && c.voiceId)
-    .map((c) => ({ character: c.character, voiceId: c.voiceId, voiceName: ve.voiceNames[c.voiceId] || c.voiceId, model: c.model }));
+    .map((c) => ({ character: c.character, voiceId: c.voiceId, voiceName: ve.voiceNames[c.voiceId] || c.voiceId, model: c.model, settings: c.settings }));
   // Player slots keep DOM order; numbering is positional (Player1, Player2, …).
   const slots = d.slots
     .filter((s) => s.voiceId)
-    .map((s, i) => ({ index: i + 1, voiceId: s.voiceId, voiceName: ve.voiceNames[s.voiceId] || s.voiceId, model: s.model }));
+    .map((s, i) => ({ index: i + 1, voiceId: s.voiceId, voiceName: ve.voiceNames[s.voiceId] || s.voiceId, model: s.model, settings: s.settings }));
 
   const dropped = d.chars.length - assignments.length + (d.slots.length - slots.length);
   try {

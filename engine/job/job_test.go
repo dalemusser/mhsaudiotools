@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/dalemusser/mhsaudiotools/engine/emotion"
 	"github.com/dalemusser/mhsaudiotools/engine/output"
+	"github.com/dalemusser/mhsaudiotools/engine/pron"
 	"github.com/dalemusser/mhsaudiotools/engine/source"
 	"github.com/dalemusser/mhsaudiotools/engine/synth"
 	"github.com/dalemusser/mhsaudiotools/engine/text"
@@ -756,5 +758,218 @@ func TestWindowsHostileIDsRejected(t *testing.T) {
 		if err := checkID(id); err != nil {
 			t.Errorf("checkID(%q) = %v, want nil", id, err)
 		}
+	}
+}
+
+// The Babylon layout must emit the ceremony player's manifest after a run,
+// covering every non-failed file (including up-to-date ones on a re-run), with
+// [startSec, word] caption pairs read from the sidecars.
+func TestBabylonLayoutEmitsCeremonyManifest(t *testing.T) {
+	dir := t.TempDir()
+	r := newRunner(t, &fakeClient{}, dir, Options{WithTimestamps: true})
+	r.Layout = output.BabylonManifest{}
+	lines := []source.LineItem{
+		{ID: "c1", Speaker: "Toppo", Text: "Welcome."},
+		{ID: "c2", Speaker: "DANI", Text: "Standing by."},
+	}
+	res, err := r.Run(context.Background(), lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.LayoutManifest == "" {
+		t.Fatal("LayoutManifest not set")
+	}
+
+	read := func() map[string]any {
+		data, err := os.ReadFile(filepath.Join(dir, "ceremony_audio.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+
+	check := func(m map[string]any) {
+		items := m["items"].([]any)
+		if len(items) != 2 {
+			t.Fatalf("items = %d, want 2", len(items))
+		}
+		first := items[0].(map[string]any)
+		if first["speaker"] != "Toppo" || first["audio"] != "assets/audio/Toppo/c1.mp3" {
+			t.Fatalf("first item wrong: %v", first)
+		}
+		words := first["words"].([]any)
+		if len(words) == 0 {
+			t.Fatal("words missing — sidecar not folded in")
+		}
+		pair := words[0].([]any)
+		if _, isNum := pair[0].(float64); !isNum || pair[1] != "hi" {
+			t.Fatalf("word pair shape wrong: %v", pair)
+		}
+		if first["durationSec"].(float64) <= 0 {
+			t.Fatal("durationSec missing")
+		}
+		if first["textHash"] == "" || first["id"] != "c1" {
+			t.Fatalf("id/textHash wrong: %v", first)
+		}
+	}
+	check(read())
+
+	// An incremental re-run (everything up to date) must still describe the
+	// whole set, not just what it wrote.
+	res2, err := newRunnerWithLayout(t, dir).Run(context.Background(), lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.Written != 0 {
+		t.Fatalf("second run wrote %d, want 0", res2.Written)
+	}
+	check(read())
+}
+
+func newRunnerWithLayout(t *testing.T, dir string) *Runner {
+	t.Helper()
+	r := newRunner(t, &fakeClient{}, dir, Options{WithTimestamps: true})
+	r.Layout = output.BabylonManifest{}
+	return r
+}
+
+func fp(v float64) *float64 { return &v }
+
+// Per-voice settings reach the API request; a per-line override wins for its
+// audible knobs; and changing either regenerates exactly the affected files.
+func TestVoiceSettingsAndLineOverrides(t *testing.T) {
+	dir := t.TempDir()
+	fc := &fakeClient{}
+	r := newRunner(t, fc, dir, Options{})
+	r.Voices.Assignments[0].Settings = &voice.Settings{Stability: fp(0.4), Speed: fp(1.1)}
+	r.Overrides = voice.Overrides{
+		"8_Toppo_2": {Stability: fp(0.2)}, // override wins over the voice's 0.4
+	}
+	lines := []source.LineItem{
+		{ID: "8_Toppo_2", Speaker: "Toppo", Text: "Hello cadet."},
+		{ID: "8_DANI_4", Speaker: "DANI", Text: "Classify this."}, // no settings at all
+	}
+	if _, err := r.Run(context.Background(), lines); err != nil {
+		t.Fatal(err)
+	}
+
+	byVoice := map[string]*synth.VoiceSettings{}
+	for _, req := range fc.requests {
+		byVoice[req.VoiceID] = req.VoiceSettings
+	}
+	s := byVoice["v-toppo"]
+	if s == nil || s.Stability == nil || *s.Stability != 0.2 || s.Speed == nil || *s.Speed != 1.1 {
+		t.Fatalf("toppo settings = %+v, want stability 0.2 (override) + speed 1.1 (voice)", s)
+	}
+	if byVoice["v-dani"] != nil {
+		t.Fatalf("dani got settings %+v, want none (voice defaults)", byVoice["v-dani"])
+	}
+
+	// Identical settings: everything up to date.
+	r2 := newRunner(t, &fakeClient{}, dir, Options{})
+	r2.Voices.Assignments[0].Settings = &voice.Settings{Stability: fp(0.4), Speed: fp(1.1)}
+	r2.Overrides = voice.Overrides{"8_Toppo_2": {Stability: fp(0.2)}}
+	res, err := r2.Run(context.Background(), lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Written != 0 {
+		t.Fatalf("unchanged settings regenerated %d files", res.Written)
+	}
+
+	// Tweaking the override regenerates only that line's file.
+	r3 := newRunner(t, &fakeClient{}, dir, Options{})
+	r3.Voices.Assignments[0].Settings = &voice.Settings{Stability: fp(0.4), Speed: fp(1.1)}
+	r3.Overrides = voice.Overrides{"8_Toppo_2": {Stability: fp(0.3)}}
+	res, err = r3.Run(context.Background(), lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Written != 1 || res.SkippedFiles != 1 {
+		t.Fatalf("written=%d skipped=%d, want 1/1 after override change", res.Written, res.SkippedFiles)
+	}
+}
+
+// A player line's override applies to every slot's rendering of that line.
+func TestLineOverrideAppliesToAllPlayerSlots(t *testing.T) {
+	dir := t.TempDir()
+	fc := &fakeClient{}
+	r := newRunner(t, fc, dir, Options{})
+	r.Overrides = voice.Overrides{"8_Player_12": {Speed: fp(0.9)}}
+	lines := []source.LineItem{{ID: "8_Player_12", Speaker: "Player", Text: "Got it."}}
+	if _, err := r.Run(context.Background(), lines); err != nil {
+		t.Fatal(err)
+	}
+	if len(fc.requests) != 3 {
+		t.Fatalf("requests = %d, want 3 slots", len(fc.requests))
+	}
+	for _, req := range fc.requests {
+		if req.VoiceSettings == nil || req.VoiceSettings.Speed == nil || *req.VoiceSettings.Speed != 0.9 {
+			t.Fatalf("slot %s settings = %+v, want speed 0.9", req.VoiceID, req.VoiceSettings)
+		}
+	}
+}
+
+// Pronunciation dictionary: the locator rides on every request while the text
+// keeps the writers' spelling; editing a rule regenerates only affected lines;
+// an unpublished set refuses to run.
+func TestPronunciationDictionaryFlow(t *testing.T) {
+	dir := t.TempDir()
+	set := pron.DefaultSet()
+	set.DictionaryID, set.VersionID, set.PublishedHash = "dict-1", "ver-1", set.RulesHash()
+
+	fc := &fakeClient{}
+	r := newRunner(t, fc, dir, Options{})
+	r.Cleanup = text.MHSProfile()
+	r.Pronunciations = set
+	lines := []source.LineItem{
+		{ID: "8_Toppo_2", Speaker: "Toppo", Text: "Welcome to WAT247."},
+		{ID: "8_DANI_4", Speaker: "DANI", Text: "Nothing special here."},
+	}
+	if _, err := r.Run(context.Background(), lines); err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range fc.requests {
+		if len(req.DictionaryLocators) != 1 || req.DictionaryLocators[0].ID != "dict-1" {
+			t.Fatalf("request missing locator: %+v", req.DictionaryLocators)
+		}
+		if strings.Contains(req.Text, "Watt 2 4 7") {
+			t.Fatalf("text was rewritten client-side: %q", req.Text)
+		}
+	}
+	var sawOriginal bool
+	for _, req := range fc.requests {
+		if strings.Contains(req.Text, "WAT247") {
+			sawOriginal = true
+		}
+	}
+	if !sawOriginal {
+		t.Fatal("original spelling never reached the API")
+	}
+
+	// Editing the matching rule regenerates only the affected line.
+	set2 := pron.DefaultSet()
+	set2.Rules["WAT247"] = "Watt two four seven"
+	set2.DictionaryID, set2.VersionID, set2.PublishedHash = "dict-1", "ver-2", set2.RulesHash()
+	r2 := newRunner(t, &fakeClient{}, dir, Options{})
+	r2.Cleanup = text.MHSProfile()
+	r2.Pronunciations = set2
+	res, err := r2.Run(context.Background(), lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Written != 1 || res.SkippedFiles != 1 {
+		t.Fatalf("written=%d skipped=%d, want 1/1 (only the WAT247 line)", res.Written, res.SkippedFiles)
+	}
+
+	// Unpublished rules must refuse to run rather than silently mispronounce.
+	r3 := newRunner(t, &fakeClient{}, dir, Options{})
+	r3.Pronunciations = pron.DefaultSet()
+	if _, err := r3.Run(context.Background(), lines); err == nil || !strings.Contains(err.Error(), "publish") {
+		t.Fatalf("want unpublished error, got %v", err)
 	}
 }

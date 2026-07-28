@@ -59,12 +59,10 @@ func MHSProfile() *Profile {
 			{Kind: RuleLiteral, Op: OpReplace, From: "–", To: " ", Note: "en dash"},
 			{Kind: RuleLiteral, Op: OpReplace, From: "-", To: " ", Note: "hyphen"},
 			{Kind: RuleLiteral, Op: OpReplace, From: "—", To: " ", Note: "em dash"},
-			{Kind: RuleLiteral, Op: OpReplace, From: "TK", To: "Tea Kay", Note: "pronunciation"},
-			{Kind: RuleLiteral, Op: OpReplace, From: "WAT247", To: "Watt 2 4 7", Note: "pronunciation"},
-			{Kind: RuleLiteral, Op: OpReplace, From: "Mission HydroSci", To: "Mission Hydro Sci", Note: "pronunciation"},
-			{Kind: RuleLiteral, Op: OpReplace, From: "Mission Hydrosci", To: "Mission Hydro Sci", Note: "pronunciation"},
-			{Kind: RuleLiteral, Op: OpReplace, From: "DANI", To: "Danny", Note: "pronunciation"},
-			{Kind: RuleLiteral, Op: OpReplace, From: "Argh!", To: "ArrGh", Note: "pronunciation"},
+			// Pronunciation fixes moved to the server-side dictionary
+			// (engine/pron.DefaultSet): rewriting the text here would change
+			// what captions and word timings align to, which is exactly what
+			// the dictionary approach exists to avoid.
 
 			// Tidy up the whitespace the rules above leave behind.
 			{Kind: RuleRegex, Op: OpReplace, From: `\s+`, To: " ", Note: "collapse whitespace"},

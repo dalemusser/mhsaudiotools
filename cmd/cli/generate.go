@@ -14,6 +14,7 @@ import (
 
 	"github.com/dalemusser/mhsaudiotools/engine/job"
 	"github.com/dalemusser/mhsaudiotools/engine/output"
+	"github.com/dalemusser/mhsaudiotools/engine/pron"
 	"github.com/dalemusser/mhsaudiotools/engine/synth"
 	"github.com/dalemusser/mhsaudiotools/engine/voice"
 )
@@ -36,6 +37,9 @@ func runGenerate(args []string) error {
 		model       = fs.String("model", "", "model for voices that don't set one in the voices file: v2 (default), v3, or a full ElevenLabs model ID")
 		emotionOn   = fs.Bool("emotion", false, "turn the writers' (sighs)/(angry) directions into v3 audio tags; on v2 files the directions are stripped from the spoken text")
 		emotionPath = fs.String("emotion-map", "", "emotion map JSON (default: built-in mhs-emotion; implies -emotion)")
+		overridesP  = fs.String("voice-overrides", "", "per-line delivery tweaks JSON: line ID -> {stability, style, speed}")
+		pronPath    = fs.String("pronunciations", "", "pronunciations JSON (default: the shared per-user file, seeded with the MHS rules)")
+		noPron      = fs.Bool("no-pronunciations", false, "disable the server-side pronunciation dictionary")
 		defSpeaker  = fs.String("default-speaker", "", "character whose voice speaks lines that have no speaker (e.g. Toppo)")
 		defVoice    = fs.String("default-voice", "", "voice ID for lines that have no speaker")
 		keyFile     = fs.String("key-file", "", "file holding the ElevenLabs API key")
@@ -88,6 +92,17 @@ func runGenerate(args []string) error {
 	if err != nil {
 		return err
 	}
+	var overrides voice.Overrides
+	if *overridesP != "" {
+		overrides, err = voice.LoadOverrides(*overridesP)
+		if err != nil {
+			return err
+		}
+	}
+	prons, pronFile, err := loadPronunciations(*pronPath, *noPron)
+	if err != nil {
+		return err
+	}
 	layout, err := pickLayout(*layoutName)
 	if err != nil {
 		return err
@@ -95,10 +110,12 @@ func runGenerate(args []string) error {
 	defaultModel := resolveModel(*model)
 
 	runner := &job.Runner{
-		Cleanup: profile,
-		Voices:  cfg,
-		Layout:  layout,
-		Emotion: emo,
+		Cleanup:        profile,
+		Voices:         cfg,
+		Layout:         layout,
+		Emotion:        emo,
+		Overrides:      overrides,
+		Pronunciations: prons,
 		Options: job.Options{
 			OutputDir:      *outDir,
 			Format:         synth.AudioFormat(*format),
@@ -142,6 +159,14 @@ func runGenerate(args []string) error {
 				"which changes it and regenerates affected lines\n")
 		}
 	}
+	if overrides != nil {
+		fmt.Printf("Tweaks:   %d line override(s) from %s\n", len(overrides), *overridesP)
+	}
+	if prons.Active() {
+		fmt.Printf("Pronounce: %s (%d rules, server-side dictionary)\n", prons.Name, len(prons.Rules))
+	} else {
+		fmt.Printf("Pronounce: disabled\n")
+	}
 	fmt.Printf("Output:   %s  [layout %s, format %s, timestamps %v]\n\n",
 		*outDir, layout.Name(), *format, *timestamps)
 
@@ -153,7 +178,19 @@ func runGenerate(args []string) error {
 	if err != nil {
 		return err
 	}
-	runner.Client = synth.NewElevenLabs(key)
+	client := synth.NewElevenLabs(key)
+	runner.Client = client
+
+	// The dictionary must exist server-side before any request references it.
+	if prons.Active() && prons.NeedsPublish() {
+		fmt.Printf("Publishing pronunciation dictionary (%d rules)…\n", len(prons.Rules))
+		if err := pron.Publish(context.Background(), client, prons); err != nil {
+			return err
+		}
+		if err := prons.Save(pronFile); err != nil {
+			return fmt.Errorf("saving pronunciations state: %w", err)
+		}
+	}
 
 	// Ctrl-C cancels cleanly: in-flight work stops and the manifest is saved, so
 	// a re-run resumes rather than starting over. Once the first signal has
@@ -168,9 +205,41 @@ func runGenerate(args []string) error {
 	pr := newProgressPrinter()
 	runner.OnProgress = pr.update
 
+	// Record the run in the shared history (the same file the app's History
+	// card reads). Best-effort — history must never block a run.
+	var (
+		store *job.Store
+		rec   job.Record
+	)
+	if path, err := job.DefaultStorePath(); err == nil {
+		store = job.OpenStore(path)
+		rec = job.Record{
+			ID: job.NewID(time.Now()), Created: time.Now(),
+			Status: job.StatusRunning, Shell: "cli",
+			Source: *in, OutputDir: *outDir, Layout: layout.Name(),
+		}
+		_ = store.Put(rec)
+	}
+
 	start := time.Now()
 	res, runErr := runner.Run(ctx, lines)
 	pr.done()
+
+	if store != nil {
+		if res != nil {
+			rec.Targets, rec.Written, rec.Failed = res.Targets, res.Written, res.Failed
+			rec.Done = res.Written + res.Failed
+		}
+		switch {
+		case errors.Is(runErr, context.Canceled):
+			rec.Status = job.StatusCanceled
+		case runErr != nil:
+			rec.Status, rec.Error = job.StatusFailed, runErr.Error()
+		default:
+			rec.Status = job.StatusCompleted
+		}
+		_ = store.Put(rec)
+	}
 
 	if res != nil {
 		printResult(res, time.Since(start))
@@ -348,6 +417,9 @@ func printResult(res *job.Result, elapsed time.Duration) {
 		}
 	}
 	fmt.Printf("\nManifest: %s\n", res.ManifestPath)
+	if res.LayoutManifest != "" {
+		fmt.Printf("Player manifest: %s\n", res.LayoutManifest)
+	}
 }
 
 // progressPrinter renders a single rewriting status line. OnProgress is called

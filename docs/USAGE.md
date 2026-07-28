@@ -8,9 +8,9 @@ Both tools do the same thing: take **dialog**, apply your **voices**, and write
 - **Dialog source** — where the lines come from. Two formats are supported:
   - **Dialogue System export** (`.csv`) — the game's dialog database export. The
     line's ID becomes the audio filename; the speaker is read from the ID.
-  - **Writer script** (`.txt`) — one line per row as `id: spoken text`. Use it for
-    a writer's cutscene or lesson script. These lines have no speaker, so you set a
-    **default voice**.
+  - **Writer script** (`.txt`) — one line per row as `id: spoken text`, or
+    `id | Speaker: spoken text` for multi-character scripts (`Player` fans out
+    across the player slots). Speaker-less lines use the **default voice** you set.
 - **Voices** — which ElevenLabs voice speaks each character, kept in a
   `voices.json`. You can import the team's `VoiceAssignments.csv` and the tool
   converts it. The player character has **numbered voice slots** (Player1…Player6);
@@ -20,7 +20,18 @@ Both tools do the same thing: take **dialog**, apply your **voices**, and write
   top level and player lines into `Player1/`…`PlayerN/`, exactly as the game loads
   them. *Babylon manifest* is for the web projects.
 - **Cleanup** — strips stage directions and formatting (`[em1]`, `{{PLACEHOLDER…}}`)
-  and fixes pronunciations (`WAT247` → "Watt 2 4 7") before speaking. On by default.
+  before speaking. On by default.
+- **Pronunciation** — words like `WAT247` are pronounced correctly by a
+  server-side dictionary while the text (and so captions/word timings) keeps the
+  writers' spelling. On by default; editable in the app. See
+  [Pronunciation](#pronunciation).
+- **Voice settings & line tweaks** — per-voice delivery knobs (stability, style,
+  speed…) set in the voice editor, plus per-line overrides in a
+  `voice-overrides.json`. See
+  [Voice settings & per-line tweaks](#voice-settings--per-line-tweaks).
+- **Job history** — every run is remembered (app **Recent jobs** card / CLI
+  `mhsaudio jobs`); interrupted runs can be resumed. See
+  [Job history](#job-history).
 - **Model & emotion** — each voice can render on ElevenLabs **v2** (best likeness)
   or **v3** (understands emotion tags). With **Apply emotion** on (CLI: `-emotion`,
   or `-emotion-map` for a custom map), the writers' `(sighs)`/`(angry)` directions
@@ -101,10 +112,12 @@ mhsaudio voices -filter toppo
 
 ### Maintaining the cleanup rules
 
-Cleanup (removing stage directions/markup, fixing pronunciations) uses a profile.
-By default it's the built-in `mhs-dialogue` rules; keep **one shared `cleanup.json`**
-the team edits over time. Create it from the defaults (in the app: *Save MHS
-defaults…*), then edit it as new markup or pronunciation issues turn up.
+Cleanup (removing stage directions/markup) uses a profile. By default it's the
+built-in `mhs-dialogue` rules; keep **one shared `cleanup.json`** the team edits
+over time. Create it from the defaults (in the app: *Save MHS defaults…*), then
+edit it as new markup turns up. Pronunciation fixes belong in the
+[pronunciation rules](#pronunciation), not here — a cleanup replacement would
+rewrite the text that captions and word timings align to.
 
 Find what the current rules miss — `scan` applies the profile and reports the
 leftover markup, so it only surfaces genuinely new tokens:
@@ -134,7 +147,15 @@ mhsaudio generate -in 2026-06-10-MHSDialogueExport.csv \
   -voices voices.json -out ./audio
 ```
 
-A writer script needs a default voice:
+A writer script needs a default voice for its speaker-less lines; lines can
+also name their speaker directly (`ID | Speaker: text`), and both forms mix in
+one file — `Player` lines fan out across the player voice slots as usual:
+
+```
+u1: Narration read by the default voice.
+u2 | Toppo: Welcome back, cadet.
+u3 | Player: On my way.
+```
 
 ```bash
 mhsaudio generate -in toppo-lessons.txt -voices voices.json \
@@ -167,6 +188,9 @@ mhsaudio generate -in export.csv -voices voices.json -out ./audio -emotion
 | `-model` | model for voices that don't set one: `v2`, `v3`, or a full ID | `v2` |
 | `-emotion` | directions → v3 audio tags; stripped from v2 voices' text | off |
 | `-emotion-map` | custom emotion map JSON (implies `-emotion`) | built-in `mhs-emotion` |
+| `-voice-overrides` | per-line delivery tweaks JSON (see below) | — |
+| `-pronunciations` | pronunciations JSON (server-side dictionary) | shared per-user file |
+| `-no-pronunciations` | disable the pronunciation dictionary | off (dictionary on) |
 | `-default-speaker` | character voice for speaker-less lines | — |
 | `-default-voice` | raw voice ID for speaker-less lines (alternative to `-default-speaker`) | — |
 | `-key-file` | file holding the ElevenLabs API key | env, then `~/.elevenlabs_key` |
@@ -184,6 +208,82 @@ voice/model/format are honored as-is (nothing regenerates on upgrade) — but
 that also means the tool can't detect a voice recast that happened *before*
 the upgrade. If casting changed since those files were made, run once with
 `-force`.
+
+### Voice settings & per-line tweaks
+
+Each voice can carry its own delivery settings — **stability**, **style**,
+**similarity**, **speaker boost**, **speed** — set in the app's voice editor
+(the ⚙ button on a row; the ▶ preview auditions them). Blank knobs stay at the
+voice's ElevenLabs defaults; settings are saved in `voices.json` and survive
+CSV re-imports.
+
+For single lines that need something special, a `voice-overrides.json` (kept
+next to `voices.json`, owned by whoever directs the audio) maps line IDs to
+tweaks of the audible knobs:
+
+```json
+{
+  "U1_Toppo_2":  { "stability": 0.3, "speed": 1.1 },
+  "U2_DANI_14":  { "style": 0.6 }
+}
+```
+
+App: **Line tweaks → Choose voice-overrides.json…** in the options. CLI:
+`-voice-overrides voice-overrides.json`. A player line's tweak applies to every
+slot's rendering. Changing any setting regenerates exactly the affected files
+on the next run — no `-force` needed.
+
+### Pronunciation
+
+Words like `WAT247` are pronounced correctly by a server-side ElevenLabs
+**pronunciation dictionary** instead of rewriting the text: the request keeps
+the writers' spelling, so captions and word timings align to the displayed
+text — `WAT247` is one timed token spanning the whole spoken phrase, which is
+what caption highlighting needs. (Verified live; see
+`docs/pronunciation-dictionaries.md`.)
+
+Rules live in a `pronunciations.json` — by default a shared per-user file
+seeded with the MHS rules; the app's **Edit rules…** editor changes them (CLI:
+`-pronunciations file.json` for a project-specific file, `-no-pronunciations`
+to disable). When rules change, the dictionary republishes to the account
+automatically at the start of the next run, and only the lines containing a
+changed word regenerate.
+
+Note: pronunciation used to be part of the cleanup profile as text
+replacement. Old custom cleanup profiles that still carry those rules keep
+working, but they rewrite the text (captions show the respelling) — remove
+them from custom profiles to get the dictionary behavior.
+
+### API key storage
+
+The key resolves in this order: `$ELEVENLABS_API_KEY` → `-key-file` → the
+**macOS Keychain** → `~/.elevenlabs_key`. On macOS you can keep it encrypted in
+the Keychain instead of the dotfile — entirely optional, nothing migrates by
+itself:
+
+- **App**: the key screen has a "Store in the macOS Keychain" checkbox
+  (checked by default on Macs).
+- **CLI**: `mhsaudio key` shows where the key currently comes from (never the
+  key itself); `mhsaudio key -store-keychain` copies it into the Keychain, and
+  adding `-rm-file` also deletes the plaintext dotfile.
+
+Windows/Linux keep using the dotfile (or the env var).
+
+### Job history
+
+Both the app and the CLI record every run in a shared history (in your user
+config folder, capped at 50 entries). The app shows it as a **Recent jobs**
+card — an interrupted run (app quit or crash mid-batch) is flagged there with a
+**Resume** button, and any job can be re-run, opened, or removed. From the
+terminal, `mhsaudio jobs` lists the same history.
+
+### Babylon manifest
+
+With `-layout babylon-manifest`, each completed run also writes
+`ceremony_audio.json` into the output folder — the manifest the ceremony player
+loads, listing every file with its `assets/audio/…` URL, word-timing caption
+pairs, duration, and text hash. Generate with `-timestamps` so the caption data
+is populated.
 
 ### Exit codes
 

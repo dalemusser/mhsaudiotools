@@ -1,9 +1,8 @@
 // Package job runs a generation batch: it plans the work (clean text, resolve
 // voices, expand player fan-out, drop what's already up to date), then executes
 // it through a bounded worker pool with progress reporting and cancellation.
-//
-// TODO (phase 2): persist job records so runs survive an app restart and can be
-// listed, resumed, and expired.
+// record.go persists per-run records (shared between the CLI and the app) so
+// runs survive a restart and can be listed, resumed, and expired.
 package job
 
 import (
@@ -15,12 +14,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
 	"github.com/dalemusser/mhsaudiotools/engine/emotion"
 	"github.com/dalemusser/mhsaudiotools/engine/output"
+	"github.com/dalemusser/mhsaudiotools/engine/pron"
 	"github.com/dalemusser/mhsaudiotools/engine/source"
 	"github.com/dalemusser/mhsaudiotools/engine/synth"
 	"github.com/dalemusser/mhsaudiotools/engine/text"
@@ -87,15 +88,27 @@ type Result struct {
 	Failed       int
 	Errors       []LineError
 	ManifestPath string
+
+	// LayoutManifest is the consumer-facing manifest path, set when the layout
+	// emits one (Babylon's ceremony_audio.json).
+	LayoutManifest string
 }
 
 // Runner executes a generation run over normalized lines.
 type Runner struct {
-	Client  synth.Client
-	Cleanup *text.Profile // optional; nil means no text cleanup
-	Voices  *voice.Config
-	Layout  output.Layout
-	Emotion *emotion.Map // optional; when set, v3 voices get audio tags from directions
+	Client    synth.Client
+	Cleanup   *text.Profile // optional; nil means no text cleanup
+	Voices    *voice.Config
+	Layout    output.Layout
+	Emotion   *emotion.Map    // optional; when set, v3 voices get audio tags from directions
+	Overrides voice.Overrides // optional; per-line delivery tweaks keyed by line ID
+
+	// Pronunciations, when active, attaches the published dictionary to every
+	// request — the text keeps the writers' spelling and the server fixes the
+	// pronunciation, so timings/captions align to the displayed text. The set
+	// must be published (shells do that) before Run.
+	Pronunciations *pron.Set
+
 	Options Options
 
 	// OnProgress, if set, is called as units complete. It must be safe to call
@@ -107,23 +120,26 @@ type Runner struct {
 // a v3 voice gets emotion tags a v2 voice doesn't, so they differ across a player
 // line's slots.
 type unit struct {
-	lineID  string
-	relPath string
-	voiceID string
-	model   string
-	text    string
-	ent     entry
+	lineID   string
+	relPath  string
+	voiceID  string
+	model    string
+	text     string
+	settings *synth.VoiceSettings
+	ent      entry
 }
 
 // PlanItem is one audio file a run would produce.
 type PlanItem struct {
 	LineID    string
+	Speaker   string
 	RelPath   string
 	VoiceID   string
 	VoiceName string
-	Model     string // the model this file renders with
-	Text      string // the exact text that will be sent (incl. any v3 audio tags)
-	UpToDate  bool   // already generated from this exact text; would be skipped
+	Settings  *synth.VoiceSettings // effective knobs (voice + line override); nil = defaults
+	Model     string               // the model this file renders with
+	Text      string               // the exact text that will be sent (incl. any v3 audio tags)
+	UpToDate  bool                 // already generated from this exact text; would be skipped
 }
 
 // PlanResult reports what Run would do, without calling the API — the basis for
@@ -171,6 +187,9 @@ func (r *Runner) Run(ctx context.Context, lines []source.LineItem) (*Result, err
 	if r.Options.OutputDir == "" {
 		return nil, errors.New("job: no output directory configured")
 	}
+	if r.Pronunciations.Active() && r.Pronunciations.NeedsPublish() {
+		return nil, errors.New("job: pronunciation rules are not published — publish the dictionary before running")
+	}
 
 	man, err := loadManifest(r.Options.OutputDir)
 	if err != nil {
@@ -192,12 +211,13 @@ func (r *Runner) Run(ctx context.Context, lines []source.LineItem) (*Result, err
 			continue
 		}
 		units = append(units, unit{
-			lineID:  it.LineID,
-			relPath: it.RelPath,
-			voiceID: it.VoiceID,
-			model:   it.Model,
-			text:    it.Text,
-			ent:     r.entryFor(it.VoiceID, it.Model, it.Text),
+			lineID:   it.LineID,
+			relPath:  it.RelPath,
+			voiceID:  it.VoiceID,
+			model:    it.Model,
+			text:     it.Text,
+			settings: it.Settings,
+			ent:      r.entryFor(it.VoiceID, it.Model, it.Text, it.Settings),
 		})
 	}
 
@@ -211,6 +231,36 @@ func (r *Runner) Run(ctx context.Context, lines []source.LineItem) (*Result, err
 		return res, fmt.Errorf("job: saving manifest: %w", err)
 	}
 	res.ManifestPath = filepath.Join(r.Options.OutputDir, manifestName)
+
+	// A layout with a consumer-facing manifest (Babylon's ceremony player)
+	// gets it after a completed run, covering every non-failed target so an
+	// incremental run still describes the whole set.
+	if w, ok := r.Layout.(output.RunManifestWriter); ok {
+		failedRel := make(map[string]bool, len(res.Errors))
+		for _, e := range res.Errors {
+			if e.RelPath != "" {
+				failedRel[e.RelPath] = true
+			}
+		}
+		files := make([]output.RunManifestFile, 0, len(p.Items))
+		for i, it := range p.Items {
+			if failedRel[it.RelPath] {
+				continue
+			}
+			files = append(files, output.RunManifestFile{
+				Index:    i,
+				ID:       it.LineID,
+				Speaker:  it.Speaker,
+				RelPath:  it.RelPath,
+				TextHash: hashText(it.Text),
+			})
+		}
+		mp, err := w.WriteRunManifest(r.Options.OutputDir, files)
+		if err != nil {
+			return res, fmt.Errorf("job: writing layout manifest: %w", err)
+		}
+		res.LayoutManifest = mp
+	}
 	return res, nil
 }
 
@@ -269,6 +319,7 @@ func (r *Runner) planWith(lines []source.LineItem, man *manifest) *PlanResult {
 			continue
 		}
 
+		ov, hasOv := r.Overrides[li.ID]
 		for _, tg := range targets {
 			// Layouts splice in more than the ID (Babylon uses the speaker as a
 			// folder), so vet the full path they built, not just the ID.
@@ -284,15 +335,18 @@ func (r *Runner) planWith(lines []source.LineItem, man *manifest) *PlanResult {
 			if r.Emotion != nil && model == synth.ModelV3 {
 				text = r.Emotion.Apply(base, directions)
 			}
+			eff := effectiveSettings(tg.Settings, ov, hasOv)
 			item := PlanItem{
 				LineID:    li.ID,
+				Speaker:   li.Speaker,
 				RelPath:   tg.RelPath,
 				VoiceID:   tg.VoiceID,
 				VoiceName: tg.VoiceName,
+				Settings:  eff,
 				Model:     model,
 				Text:      text,
 			}
-			if !r.Options.Force && man.upToDate(r.Options.OutputDir, tg.RelPath, r.entryFor(tg.VoiceID, model, text)) {
+			if !r.Options.Force && man.upToDate(r.Options.OutputDir, tg.RelPath, r.entryFor(tg.VoiceID, model, text, eff)) {
 				item.UpToDate = true
 				p.UpToDate++
 			} else {
@@ -355,18 +409,74 @@ func checkFilename(name string) error {
 
 // entryFor captures everything that determines a target's rendered content; if
 // any of it changes on a later run, the file regenerates.
-func (r *Runner) entryFor(voiceID, model, text string) entry {
+func (r *Runner) entryFor(voiceID, model, text string, s *synth.VoiceSettings) entry {
 	f := string(r.Options.Format)
 	if f == "" {
 		f = string(synth.MP3_44100_128)
 	}
 	return entry{
-		Text:   hashText(text),
-		Voice:  voiceID,
-		Model:  model,
-		Format: f,
-		Words:  r.Options.WithTimestamps,
+		Text:     hashText(text),
+		Voice:    voiceID,
+		Model:    model,
+		Format:   f,
+		Words:    r.Options.WithTimestamps,
+		Settings: settingsKey(s),
+		// Keyed per line: only lines a rule actually touches regenerate when
+		// the pronunciation rules change.
+		Dict: r.Pronunciations.AffectedKey(text),
 	}
+}
+
+// effectiveSettings merges a line's override onto its voice's settings; nil
+// means nothing is sent and the voice's ElevenLabs defaults apply.
+func effectiveSettings(vs *voice.Settings, ov voice.LineOverride, hasOv bool) *synth.VoiceSettings {
+	if vs == nil && !hasOv {
+		return nil
+	}
+	out := &synth.VoiceSettings{}
+	if vs != nil {
+		out.Stability = vs.Stability
+		out.SimilarityBoost = vs.SimilarityBoost
+		out.Style = vs.Style
+		out.UseSpeakerBoost = vs.SpeakerBoost
+		out.Speed = vs.Speed
+	}
+	if hasOv {
+		if ov.Stability != nil {
+			out.Stability = ov.Stability
+		}
+		if ov.Style != nil {
+			out.Style = ov.Style
+		}
+		if ov.Speed != nil {
+			out.Speed = ov.Speed
+		}
+	}
+	if out.Stability == nil && out.SimilarityBoost == nil && out.Style == nil &&
+		out.UseSpeakerBoost == nil && out.Speed == nil {
+		return nil // an empty override object adds nothing
+	}
+	return out
+}
+
+// settingsKey canonicalizes effective settings for the manifest, so changing
+// any knob regenerates exactly the affected files. "" means none were sent.
+func settingsKey(s *synth.VoiceSettings) string {
+	if s == nil {
+		return ""
+	}
+	f := func(p *float64) string {
+		if p == nil {
+			return "-"
+		}
+		return strconv.FormatFloat(*p, 'f', -1, 64)
+	}
+	b := "-"
+	if s.UseSpeakerBoost != nil {
+		b = strconv.FormatBool(*s.UseSpeakerBoost)
+	}
+	return fmt.Sprintf("st:%s|si:%s|sy:%s|b:%s|sp:%s",
+		f(s.Stability), f(s.SimilarityBoost), f(s.Style), b, f(s.Speed))
 }
 
 // modelFor resolves a target's model: the voice's own, else the run default,
@@ -491,12 +601,21 @@ func (r *Runner) renderOne(ctx context.Context, u unit) (wroteWords bool, err er
 		return false, fmt.Errorf("output path %q escapes the output folder", u.relPath)
 	}
 
+	var locators []synth.DictionaryLocator
+	if r.Pronunciations.Active() {
+		locators = []synth.DictionaryLocator{{
+			ID:        r.Pronunciations.DictionaryID,
+			VersionID: r.Pronunciations.VersionID,
+		}}
+	}
 	out, err := r.Client.Synthesize(ctx, synth.Request{
-		VoiceID:        u.voiceID,
-		Text:           u.text,
-		ModelID:        u.model,
-		Format:         r.Options.Format,
-		WithTimestamps: r.Options.WithTimestamps,
+		VoiceID:            u.voiceID,
+		Text:               u.text,
+		ModelID:            u.model,
+		Format:             r.Options.Format,
+		WithTimestamps:     r.Options.WithTimestamps,
+		VoiceSettings:      u.settings,
+		DictionaryLocators: locators,
 	})
 	if err != nil {
 		return false, err
@@ -582,11 +701,13 @@ type manifest struct {
 
 // entry is one file's generation record.
 type entry struct {
-	Text   string `json:"text"`             // hash of the exact text sent
-	Voice  string `json:"voice,omitempty"`  // ElevenLabs voice ID
-	Model  string `json:"model,omitempty"`  // ElevenLabs model ID
-	Format string `json:"format,omitempty"` // output_format
-	Words  bool   `json:"words,omitempty"`  // word-timings sidecar written
+	Text     string `json:"text"`               // hash of the exact text sent
+	Voice    string `json:"voice,omitempty"`    // ElevenLabs voice ID
+	Model    string `json:"model,omitempty"`    // ElevenLabs model ID
+	Format   string `json:"format,omitempty"`   // output_format
+	Words    bool   `json:"words,omitempty"`    // word-timings sidecar written
+	Settings string `json:"settings,omitempty"` // canonical effective voice settings
+	Dict     string `json:"dict,omitempty"`     // pronunciation rules affecting this line
 }
 
 // UnmarshalJSON accepts both the current object form and the legacy v1 bare
@@ -650,6 +771,14 @@ func (m *manifest) upToDate(dir, rel string, want entry) bool {
 		return false
 	}
 	if rec.Format != "" && rec.Format != want.Format {
+		return false
+	}
+	// Settings compare exactly: "" is a real value ("none sent"), so adding or
+	// changing knobs regenerates, including against pre-settings manifests.
+	if rec.Settings != want.Settings {
+		return false
+	}
+	if rec.Dict != want.Dict {
 		return false
 	}
 	full := filepath.Join(dir, filepath.FromSlash(rel))

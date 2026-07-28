@@ -23,6 +23,8 @@ Commands:
   voices          List the voices available on the account
   account         Show the account tier and its max concurrency
   import-voices   Convert/merge a VoiceAssignments.csv into a voices.json config
+  jobs            List recent generation runs (shared history with the app)
+  key             Show where the API key comes from; store it in the macOS Keychain
   version         Show the version
 
 Run "mhsaudio <command> -h" for a command's flags.
@@ -48,6 +50,10 @@ func main() {
 		err = runAccount(os.Args[2:])
 	case "import-voices":
 		err = runImportVoices(os.Args[2:])
+	case "jobs":
+		err = runJobs(os.Args[2:])
+	case "key":
+		err = runKey(os.Args[2:])
 	case "version", "--version":
 		fmt.Printf("mhsaudio %s\nCopyright © 2026 Intelligence Builders. MIT License.\n", version)
 		return

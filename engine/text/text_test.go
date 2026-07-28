@@ -44,9 +44,12 @@ func TestMHSProfileMatchesPriorBehavior(t *testing.T) {
 			"The water is clean.",
 		},
 		{
-			"pronunciation replacements",
+			// Pronunciation moved to the server-side dictionary (engine/pron):
+			// cleanup must now leave these words alone, so captions and word
+			// timings align to the displayed text.
+			"pronunciation words left untouched",
 			"Welcome to WAT247, this is Mission HydroSci. DANI out.",
-			"Welcome to Watt 2 4 7, this is Mission Hydro Sci. Danny out.",
+			"Welcome to WAT247, this is Mission HydroSci. DANI out.",
 		},
 		{
 			"smart apostrophe normalized",
@@ -141,12 +144,13 @@ func TestProfileSaveLoadRoundTripUsesReadableNames(t *testing.T) {
 	if got.Name != "mhs-dialogue" || len(got.Rules) != len(MHSProfile().Rules) {
 		t.Fatalf("round trip lost data: name=%q rules=%d", got.Name, len(got.Rules))
 	}
-	// Behavior must survive the round trip.
+	// Behavior must survive the round trip (markup stripped; pronunciation
+	// words untouched — that's the dictionary's job now).
 	out, err := got.Apply("[em1]Welcome to WAT247.[/em1]")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(out) != "Welcome to Watt 2 4 7." {
+	if strings.TrimSpace(out) != "Welcome to WAT247." {
 		t.Errorf("after round trip: %q", out)
 	}
 }
