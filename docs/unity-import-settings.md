@@ -1,4 +1,4 @@
-> **Superseded** by [unity-webgl-audio-import.md](unity-webgl-audio-import.md) (2026-07-28), which is verified against current Unity Web docs and sized for our ~600-clip case. Kept for history.
+> **Superseded** by [unity-webgl-audio-import.md](unity-webgl-audio-import.md) (2026-07-28), which is verified against current Unity Web docs and sized for our ~6,000-clip case. Kept for history.
 
 You’re thinking about it the right way. If ElevenLabs is giving you MP3s, converting them to WAV yourself does not recover any lost quality. All it does is wrap the already-lossy audio in an uncompressed container. Unity is going to decode the MP3 to PCM internally anyway, so your manual conversion is essentially duplicating the first step of Unity’s import pipeline.
 

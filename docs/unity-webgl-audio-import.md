@@ -9,8 +9,8 @@ below.*
 
 ## Our situation
 
-- **~600 MP3 files** from ElevenLabs, one file per dialog line, a few seconds
-  each (~40 minutes of audio total).
+- **~6,000 MP3 files** from ElevenLabs, one file per dialog line, a few
+  seconds each (~6–7 hours of audio total).
 - **Pixel Crushers Dialogue System**: the line's entry ID is the filename; the
   Dialogue System finds and plays the clip for the line being shown (e.g. the
   `AudioWait(entrytag)` sequencer command).
@@ -43,23 +43,26 @@ and "AudioClip import settings", checked July 2026):
    *Decompress On Load* is recommended for dialog and effects (low latency,
    precise start times), while *Compressed In Memory* is for long music
    (it trades latency and playback precision for memory). The earlier note's
-   "Compressed In Memory for dialogue" was desktop guidance scaled for a
-   hypothetical 5,000 clips; at our 600, on Web, it's the wrong default.
-   Unity also notes Chromium-based browsers may effectively force
-   decompress-on-load behavior anyway.
+   "Compressed In Memory for dialogue" was desktop guidance; on Web, with
+   on-demand loading, it's the wrong default — the memory problem is solved by
+   loading fewer clips at a time, not by keeping thousands resident in
+   compressed form. Unity also notes Chromium-based browsers may effectively
+   force decompress-on-load behavior anyway.
 
-### The memory math that makes this safe
+### The memory and size math
 
-Decoded audio is big: our full ~40 minutes as float32 at 48 kHz mono would be
-roughly **0.4–0.5 GB** if everything were decoded at once — a Chromebook
-killer. But that only happens if all 600 clips are *loaded* at startup. One
-4-second line decoded is under **1 MB**, and dialog plays one line at a time.
-So the strategy is not "keep clips compressed in memory" — it's **"only load
-the clip(s) actually being used, and let each decode on load."** That's what
-the Preload and packaging choices below arrange. Meanwhile the *compressed*
-size of all 600 clips in the build is modest: at mono, optimized sample rate,
-mid quality, expect roughly **15–25 MB** of AAC — fine inside the initial
-download at this scale.
+Decoded audio is big: our full ~6–7 hours as float32 at 48 kHz mono would be
+roughly **4–5 GB** if everything were decoded at once — instant death on a
+Chromebook. But that only happens if all 6,000 clips are *loaded* at startup.
+One 4-second line decoded is under **1 MB**, and dialog plays one line at a
+time. So the strategy is not "keep clips compressed in memory" — it's **"only
+load the clip(s) actually being used, and let each decode on load."** That's
+what the Preload and packaging choices below arrange.
+
+The *compressed* side is the second problem at this scale: 6,000 clips at
+mono, optimized sample rate, mid quality come to roughly **150–250 MB of AAC**.
+That is too much to ship inside the initial WebGL download — which is why
+packaging (next section) matters as much as the per-clip settings.
 
 ## How to apply settings (the mechanics)
 
@@ -100,23 +103,60 @@ download at this scale.
 | Normalize | Off | Keep authored levels |
 | Load In Background | On | Hide load hitches; audio commands wait anyway |
 | Load Type (WebGL tab) | **Decompress On Load** | Unity's Web guidance for dialog: instant, precise starts; per-clip decode is <1 MB |
-| Preload Audio Data | **Off** | The pairing that makes Decompress On Load safe: decode per use, not 600 at startup |
+| Preload Audio Data | **Off** | The pairing that makes Decompress On Load safe: decode per use, not 6,000 at startup |
 | Quality | **50** to start | A/B test 35 / 50 / 65 on real lines; ship the lowest that passes on laptop/Chromebook speakers |
 | Sample Rate | Optimize | Free size win for speech |
-| Packaging | **Resources folder is fine at 600 clips** (~15–25 MB in the build) | Addressables/AssetBundles only pay off if the initial download gets too big, or you want dialog updates without rebuilding — worth keeping in the back pocket given the Chromebook PWA delivery plans, not needed day one |
+| Packaging | **Addressables (or AssetBundles), grouped by unit/chapter** — not one big Resources folder | ~150–250 MB of audio can't ride in the initial download; see the packaging section |
+
+## Packaging: the decision that matters most at 6,000 clips
+
+A `Resources` folder is the convenient path for small libraries, but everything
+in `Resources` is baked into the main build data, which the browser downloads
+**before the game starts**. At ~150–250 MB of dialog audio, that alone could
+multiply the initial download and add thousands of asset records to startup.
+Even with Preload off, the *compressed* data still travels inside the initial
+package — Preload only controls decoding, not downloading.
+
+So at this scale, split the dialog out of the main build:
+
+- **Group clips by how the game consumes them** — per unit/chapter, per
+  location, or per conversation cluster. The natural grain for MHS is probably
+  the curriculum unit.
+- **Package the groups as Addressables** (or classic AssetBundles — Pixel
+  Crushers supports entrytag lookup against either, as well as Resources).
+  Load a group shortly before it's needed — entering a unit/scene — and
+  release it afterwards. Peak memory then holds one group's compressed data,
+  not the whole library, and decoded buffers only for lines in flight.
+- **Remote vs. local groups:** remote Addressable groups (fetched from a
+  server/CDN on demand) keep the initial download small and let dialog updates
+  ship without rebuilding the player — and they dovetail with the Chromebook
+  PWA delivery design (pre-cache/background-fetch could warm exactly these
+  bundles). Local (shipped-alongside) groups still cut startup memory and
+  asset-record cost, just not the download.
+- **Update flow still works:** our generator's changed-files-only export tells
+  you which clips changed; only the groups containing those clips need
+  rebuilding/re-uploading.
+
+The per-clip import settings above are unchanged by any of this — they apply
+identically whether a clip lives in Resources or a bundle.
 
 ## To verify in a real Web build (not the Editor)
 
-1. **First-line latency**: start a conversation whose clip wasn't loaded yet —
-   does audio start with the text, or lag it? (If it lags: warm the next
-   conversation's clips slightly early rather than preloading everything.)
-2. **Rapid advancing/skipping** through lines — `AudioWait()` should stop the
+1. **Initial download size** with and without the dialog audio in the main
+   build — this is the number that justifies (or not) the Addressables work.
+2. **Group load/unload behavior**: enter a unit, play dialog, leave — confirm
+   the group's memory is actually released.
+3. **First-line latency**: start a conversation whose clip wasn't loaded yet —
+   does audio start with the text, or lag it? (If it lags: warm the group
+   shortly before the conversation, not the whole library at startup.)
+4. **Rapid advancing/skipping** through lines — `AudioWait()` should stop the
    old line cleanly; watch for decode churn.
-3. **Memory after several long conversations** (browser task manager on an
+5. **Memory after several long conversations** (browser task manager on an
    actual Chromebook): confirm clips are being released, not accumulating.
-4. **The quality A/B**: three builds at 35/50/65 — compare total build size and
+6. **The quality A/B**: three builds at 35/50/65 — at ~150–250 MB total,
+   quality 40 vs 60 swings the audio payload by tens of MB; compare size and
    clarity on the worst speakers anyone will use.
-5. **`AudioClip.frequency` at runtime** if any code depends on it — the browser
+7. **`AudioClip.frequency` at runtime** if any code depends on it — the browser
    may report the context rate, not the imported rate.
 
 ## Questions for the meeting
@@ -129,4 +169,10 @@ download at this scale.
 - Are any dialog clips *scene-referenced* (which would pull them into scene
   load) rather than looked up by entrytag?
 - Is there an existing memory budget/target for the Chromebook builds this
-  should fit inside?
+  should fit inside — and a target for the initial download size?
+- What's the natural grouping for the dialog — curriculum unit, scene,
+  conversation? (It sets the Addressables group boundaries and how much audio
+  is resident at once.)
+- If groups go remote: where would the bundles be hosted, and should the
+  Chromebook PWA pre-cache plan cover them so classrooms aren't blocked on
+  mid-session downloads?
