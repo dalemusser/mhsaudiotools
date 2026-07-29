@@ -14,9 +14,15 @@ with the Pixel Crushers Dialogue System's entrytag lookup.*
   look for a clip by that name in **Resources folders, AssetBundles, and
   Addressables** — so switching to Addressables changes *where clips live*,
   not how conversations reference them. No dialog database changes.
-- With Addressables, the Dialogue System **loads the clip per line and
-  releases it when the sequencer command ends** — so per-line memory
-  management comes for free; our job is grouping, delivery, and updates.
+- Per-line **loading** is free either way: with Preload Audio Data off, the
+  entrytag lookup loads the clip on demand at line start, Resources or
+  Addressables alike. The difference is **release**: addressable loads are
+  ref-counted and the Dialogue System releases them when the sequencer command
+  ends, while Resources-loaded clips linger (decoded, under Decompress On
+  Load) until something calls `Resources.UnloadUnusedAssets()` — typically a
+  scene change. Staying build-resident? Add a per-conversation unload hook and
+  the difference disappears. Our job either way is grouping, delivery, and
+  updates.
 
 ## One-time setup
 

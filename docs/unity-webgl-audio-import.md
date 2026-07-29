@@ -218,6 +218,11 @@ factor either way.
    old line cleanly; watch for decode churn.
 5. **Memory after several long conversations** (browser task manager on an
    actual Chromebook): confirm clips are being released, not accumulating.
+   With build-resident audio, Resources-loaded clips linger until
+   `Resources.UnloadUnusedAssets()` runs (usually a scene change) — if memory
+   stair-steps here, add a conversation-end unload hook; addressable loads
+   are released per line automatically. Details and the hook script:
+   [unload-dialog-clips.md](unload-dialog-clips.md).
 6. **The quality A/B**: three builds at 35/50/65 — at ~150–250 MB total,
    quality 40 vs 60 swings the audio payload by tens of MB; compare size and
    clarity on the worst speakers anyone will use.
