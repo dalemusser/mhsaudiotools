@@ -1,3 +1,5 @@
+> **Superseded** by [unity-webgl-audio-import.md](unity-webgl-audio-import.md) (2026-07-28), which is verified against current Unity Web docs and sized for our ~600-clip case. Kept for history.
+
 That actually changes my recommendations quite a bit. A dialogue system has a very different usage pattern than a game with lots of overlapping sound effects.
 
 From what you’ve described:
