@@ -218,6 +218,13 @@
       </div>
     </div>
     <div id="preview-problems" class="hidden mt-3 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200"></div>
+    <div id="preview-orphans" class="hidden mt-3 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span id="preview-orphans-text"></span>
+        <button id="prune-orphans" class="btn">Remove orphaned files</button>
+      </div>
+      <div id="preview-orphans-list" class="mt-1 text-amber-200/70"></div>
+    </div>
   </section>
 
   <!-- Progress -->
@@ -235,6 +242,7 @@
     <div id="result-stats" class="mt-3 grid grid-cols-4 gap-3"></div>
     <div class="mt-4 flex items-center gap-3">
       <button id="reveal" class="btn">Open output folder</button>
+      <button id="copy-changed" class="btn hidden" title="Copy just this run's new/changed files into a folder, for importing into the game project">Copy changed files…</button>
       <span id="result-note" class="text-xs text-slate-500"></span>
     </div>
     <div id="result-problems" class="hidden mt-3 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200"></div>

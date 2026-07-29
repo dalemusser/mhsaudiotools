@@ -565,7 +565,32 @@ function renderPreview(p) {
   const box = $("preview-problems");
   box.classList.toggle("hidden", probs.length === 0);
   box.innerHTML = probs.map((x) => `<div>${esc(x)}</div>`).join("");
+
+  const orphans = p.orphans || [];
+  $("preview-orphans").classList.toggle("hidden", orphans.length === 0);
+  if (orphans.length) {
+    $("preview-orphans-text").textContent =
+      `${orphans.length} file(s) belong to lines no longer in the source.`;
+    const shown = orphans.slice(0, 20);
+    $("preview-orphans-list").innerHTML =
+      shown.map((x) => `<div>${esc(x)}</div>`).join("") +
+      (orphans.length > shown.length ? `<div>… and ${orphans.length - shown.length} more</div>` : "");
+  }
 }
+
+$("prune-orphans").onclick = async () => {
+  if (state.running) return;
+  $("prune-orphans").disabled = true;
+  try {
+    const deleted = (await app().PruneOrphans(request())) || [];
+    $("preview-orphans").classList.add("hidden");
+    setStatus(`${deleted.length} orphaned file(s) removed — delete them from the game project too`);
+  } catch (e) {
+    showError(e);
+  } finally {
+    $("prune-orphans").disabled = false;
+  }
+};
 
 // --- generate ---------------------------------------------------------------
 
@@ -629,6 +654,12 @@ function renderResult(r, ms) {
     ? "stopped — run again to pick up where it left off"
     : `finished in ${secs}s`;
 
+  // Offer the changed-files export whenever this run actually wrote something.
+  state.lastChangedFiles = r.changedFiles || [];
+  const cc = $("copy-changed");
+  cc.classList.toggle("hidden", state.lastChangedFiles.length === 0);
+  cc.textContent = `Copy ${commas(state.lastChangedFiles.length)} changed file(s)…`;
+
   const probs = r.problems || [];
   const box = $("result-problems");
   box.classList.toggle("hidden", probs.length === 0);
@@ -640,6 +671,20 @@ $("reveal").onclick = async () => {
     await app().RevealOutput(state.outputDir);
   } catch (e) {
     showError(e);
+  }
+};
+
+$("copy-changed").onclick = async () => {
+  const files = state.lastChangedFiles || [];
+  if (!files.length) return;
+  $("copy-changed").disabled = true;
+  try {
+    const dst = await app().ExportChangedFiles(state.outputDir, files);
+    if (dst) setStatus(`${commas(files.length)} changed file(s) copied to ${dst}`);
+  } catch (e) {
+    showError(e);
+  } finally {
+    $("copy-changed").disabled = false;
   }
 };
 

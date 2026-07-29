@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +93,11 @@ type Result struct {
 	// LayoutManifest is the consumer-facing manifest path, set when the layout
 	// emits one (Babylon's ceremony_audio.json).
 	LayoutManifest string
+
+	// WrittenFiles are the output-relative paths THIS run wrote: audio, any
+	// .words.json sidecars, and the layout manifest when one was emitted —
+	// exactly the set to import into a game project after an incremental run.
+	WrittenFiles []string
 }
 
 // Runner executes a generation run over normalized lines.
@@ -154,6 +160,13 @@ type PlanResult struct {
 	Errors       []LineError
 	Items        []PlanItem
 	Characters   int // characters that would be sent to the API
+
+	// Orphans are files the manifest recorded (so this tool created them)
+	// whose paths no target of the current plan produces — audio for lines
+	// since removed from the source. Computed only when the plan has zero
+	// problems: a failed line plans no targets, and its perfectly good files
+	// must not be mistaken for orphans.
+	Orphans []string
 }
 
 // Plan reports what Run would do. It needs no API client and makes no network
@@ -260,8 +273,102 @@ func (r *Runner) Run(ctx context.Context, lines []source.LineItem) (*Result, err
 			return res, fmt.Errorf("job: writing layout manifest: %w", err)
 		}
 		res.LayoutManifest = mp
+		if res.Written > 0 {
+			res.WrittenFiles = append(res.WrittenFiles, filepath.Base(mp))
+		}
 	}
+	sort.Strings(res.WrittenFiles)
 	return res, nil
+}
+
+// PruneOrphans deletes audio this tool created for lines no longer in the
+// source: files the manifest recorded that the current plan doesn't produce,
+// plus their timing sidecars and newly empty folders. It refuses to run when
+// the plan has any problem — a typo'd voices file must never turn half the
+// folder "orphaned" — and touches nothing the manifest doesn't know about.
+// Needs no API client.
+func (r *Runner) PruneOrphans(lines []source.LineItem) ([]string, error) {
+	if r.Options.OutputDir == "" {
+		return nil, errors.New("job: no output directory configured")
+	}
+	man, err := loadManifest(r.Options.OutputDir)
+	if err != nil {
+		return nil, fmt.Errorf("job: loading manifest: %w", err)
+	}
+	p := r.planWith(lines, man)
+	if p.Failed > 0 {
+		return nil, fmt.Errorf("job: refusing to prune with %d planning problem(s) — fix them first", p.Failed)
+	}
+	if len(p.Orphans) == 0 {
+		return nil, nil
+	}
+
+	base := filepath.Clean(r.Options.OutputDir)
+	var pruneErr error
+	deleted := make([]string, 0, len(p.Orphans))
+	for _, rel := range p.Orphans {
+		full := filepath.Join(base, filepath.FromSlash(rel))
+		// Same containment guard as writing: a hostile manifest entry must not
+		// reach outside the output folder.
+		if rp, err := filepath.Rel(base, full); err != nil || rp == ".." || strings.HasPrefix(rp, ".."+string(os.PathSeparator)) {
+			continue
+		}
+		if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
+			pruneErr = fmt.Errorf("job: removing %s: %w", rel, err)
+			break
+		}
+		side := full[:len(full)-len(filepath.Ext(full))] + ".words.json"
+		if err := os.Remove(side); err != nil && !os.IsNotExist(err) {
+			pruneErr = fmt.Errorf("job: removing sidecar for %s: %w", rel, err)
+			break
+		}
+		man.remove(rel)
+		deleted = append(deleted, rel)
+		removeEmptyDirs(base, filepath.Dir(full))
+	}
+
+	// Persist what was actually removed even when a deletion failed midway —
+	// the manifest must never claim files that are gone.
+	if err := man.save(base); err != nil && pruneErr == nil {
+		pruneErr = fmt.Errorf("job: saving manifest after prune: %w", err)
+	}
+	return deleted, pruneErr
+}
+
+// removeEmptyDirs removes dir and its now-empty parents, stopping at base or
+// the first non-empty directory (os.Remove fails on those, which is the signal).
+func removeEmptyDirs(base, dir string) {
+	for dir != base && strings.HasPrefix(dir, base+string(os.PathSeparator)) {
+		if os.Remove(dir) != nil {
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
+}
+
+// CopyFiles copies relPaths (slash-separated, relative to srcDir) into dstDir,
+// preserving the folder layout — the "changed files only" export a game
+// project imports after an incremental run, so Perforce/Unity only sees the
+// files that actually changed.
+func CopyFiles(srcDir, dstDir string, relPaths []string) error {
+	if dstDir == "" {
+		return errors.New("job: no destination folder")
+	}
+	for _, rel := range relPaths {
+		src := filepath.Join(srcDir, filepath.FromSlash(rel))
+		dst := filepath.Join(dstDir, filepath.FromSlash(rel))
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("job: reading %s: %w", rel, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			return fmt.Errorf("job: writing %s: %w", rel, err)
+		}
+	}
+	return nil
 }
 
 // planWith works out what the run would produce: it cleans each line's text,
@@ -355,6 +462,21 @@ func (r *Runner) planWith(lines []source.LineItem, man *manifest) *PlanResult {
 			}
 			p.Items = append(p.Items, item)
 		}
+	}
+
+	if p.Failed == 0 {
+		planned := make(map[string]bool, len(p.Items))
+		for _, it := range p.Items {
+			planned[it.RelPath] = true
+		}
+		man.mu.Lock()
+		for rel := range man.Files {
+			if !planned[rel] {
+				p.Orphans = append(p.Orphans, rel)
+			}
+		}
+		man.mu.Unlock()
+		sort.Strings(p.Orphans)
 	}
 	return p
 }
@@ -522,6 +644,11 @@ func (r *Runner) execute(ctx context.Context, units []unit, man *manifest, res *
 			res.Errors = append(res.Errors, LineError{LineID: u.lineID, RelPath: u.relPath, Err: err})
 		} else {
 			written++
+			res.WrittenFiles = append(res.WrittenFiles, u.relPath)
+			if wroteWords {
+				res.WrittenFiles = append(res.WrittenFiles,
+					u.relPath[:len(u.relPath)-len(filepath.Ext(u.relPath))]+".words.json")
+			}
 			// Record only what actually landed: a zero-word response writes no
 			// sidecar, and the entry must not claim one.
 			u.ent.Words = u.ent.Words && wroteWords
@@ -795,6 +922,12 @@ func (m *manifest) upToDate(dir, rel string, want entry) bool {
 func (m *manifest) set(rel string, e entry) {
 	m.mu.Lock()
 	m.Files[rel] = e
+	m.mu.Unlock()
+}
+
+func (m *manifest) remove(rel string) {
+	m.mu.Lock()
+	delete(m.Files, rel)
 	m.mu.Unlock()
 }
 

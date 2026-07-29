@@ -374,6 +374,9 @@ mhsaudio jobs                        # recent runs (history shared with the app)
 `-timestamps`, `-concurrency` (0 = auto), `-force`, `-profile` / `-no-cleanup`,
 `-model` (v2|v3|full ID — default for voices that don't set one), `-emotion` /
 `-emotion-map` (v3 audio tags from the writers' directions),
+`-pronunciations` / `-no-pronunciations`, `-voice-overrides`,
+`-prune` (delete files for removed lines after a clean run), `-delta <dir>`
+(copy this run's written files for game‑project import),
 `-default-speaker` / `-default-voice` (for speaker‑less simplescript lines), `-v`.
 
 - **`-dry-run` needs no API key** and makes no calls (`job.Runner.Plan`). It

@@ -973,3 +973,115 @@ func TestPronunciationDictionaryFlow(t *testing.T) {
 		t.Fatalf("want unpublished error, got %v", err)
 	}
 }
+
+// Orphan detection + prune: files from removed lines are found, deleted with
+// their sidecars and empty folders, and unknown files are never touched.
+func TestPruneOrphans(t *testing.T) {
+	dir := t.TempDir()
+	r := newRunner(t, &fakeClient{}, dir, Options{WithTimestamps: true})
+	if _, err := r.Run(context.Background(), testLines()); err != nil {
+		t.Fatal(err)
+	}
+
+	// A file the tool didn't create must be invisible to pruning.
+	foreign := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(foreign, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Drop the player line from the source: its three slot files are orphans.
+	kept := testLines()[:2]
+	plan, err := r.Plan(kept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Orphans list audio relpaths only; sidecars are deleted alongside.
+	if len(plan.Orphans) != 3 {
+		t.Fatalf("orphans = %v, want the 3 player files", plan.Orphans)
+	}
+
+	deleted, err := r.PruneOrphans(kept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 3 {
+		t.Fatalf("deleted = %v, want 3 player files", deleted)
+	}
+	for _, rel := range deleted {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Fatalf("%s still on disk", rel)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Player1")); !os.IsNotExist(err) {
+		t.Fatal("empty Player1/ folder not removed")
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Fatal("pruning touched a file the tool didn't create")
+	}
+
+	// Second prune: nothing left to do, and the survivors are intact.
+	deleted, err = r.PruneOrphans(kept)
+	if err != nil || len(deleted) != 0 {
+		t.Fatalf("second prune = %v, %v; want empty", deleted, err)
+	}
+	res, err := newRunner(t, &fakeClient{}, dir, Options{WithTimestamps: true}).Run(context.Background(), kept)
+	if err != nil || res.Written != 0 || res.SkippedFiles != 2 {
+		t.Fatalf("survivors disturbed: %+v, %v", res, err)
+	}
+}
+
+// Pruning must refuse to act on a plan with problems — a broken voices config
+// would otherwise make perfectly good files look orphaned.
+func TestPruneRefusesOnPlanProblems(t *testing.T) {
+	dir := t.TempDir()
+	r := newRunner(t, &fakeClient{}, dir, Options{})
+	if _, err := r.Run(context.Background(), testLines()); err != nil {
+		t.Fatal(err)
+	}
+	r2 := newRunner(t, &fakeClient{}, dir, Options{})
+	r2.Voices = &voice.Config{ // no assignments: every line fails planning
+		PlayerSlots: testConfig().PlayerSlots,
+	}
+	if _, err := r2.PruneOrphans(testLines()); err == nil {
+		t.Fatal("prune accepted a plan full of problems")
+	}
+	if p, _ := r.Plan(testLines()); len(p.Orphans) != 0 {
+		t.Fatalf("healthy plan reported orphans: %v", p.Orphans)
+	}
+}
+
+// WrittenFiles must list exactly what THIS run wrote — audio plus sidecars —
+// and CopyFiles must reproduce them under the destination.
+func TestWrittenFilesAndCopyFiles(t *testing.T) {
+	dir := t.TempDir()
+	r := newRunner(t, &fakeClient{}, dir, Options{WithTimestamps: true})
+	lines := []source.LineItem{{ID: "8_Toppo_2", Speaker: "Toppo", Text: "Hello cadet."}}
+	res, err := r.Run(context.Background(), lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"8_Toppo_2.mp3", "8_Toppo_2.words.json"}
+	if len(res.WrittenFiles) != 2 || res.WrittenFiles[0] != want[0] || res.WrittenFiles[1] != want[1] {
+		t.Fatalf("WrittenFiles = %v, want %v", res.WrittenFiles, want)
+	}
+
+	delta := t.TempDir()
+	if err := CopyFiles(dir, delta, res.WrittenFiles); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range want {
+		if _, err := os.Stat(filepath.Join(delta, rel)); err != nil {
+			t.Fatalf("delta missing %s", rel)
+		}
+	}
+
+	// An incremental re-run with one changed line writes only that file.
+	lines[0].Text = "Hello again."
+	res, err = newRunner(t, &fakeClient{}, dir, Options{}).Run(context.Background(), lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.WrittenFiles) != 1 || res.WrittenFiles[0] != "8_Toppo_2.mp3" {
+		t.Fatalf("incremental WrittenFiles = %v", res.WrittenFiles)
+	}
+}

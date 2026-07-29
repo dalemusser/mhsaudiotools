@@ -40,6 +40,8 @@ func runGenerate(args []string) error {
 		overridesP  = fs.String("voice-overrides", "", "per-line delivery tweaks JSON: line ID -> {stability, style, speed}")
 		pronPath    = fs.String("pronunciations", "", "pronunciations JSON (default: the shared per-user file, seeded with the MHS rules)")
 		noPron      = fs.Bool("no-pronunciations", false, "disable the server-side pronunciation dictionary")
+		prune       = fs.Bool("prune", false, "after a fully successful run, delete files for lines removed from the source")
+		deltaDir    = fs.String("delta", "", "also copy the files THIS run wrote into this folder (for game-project import)")
 		defSpeaker  = fs.String("default-speaker", "", "character whose voice speaks lines that have no speaker (e.g. Toppo)")
 		defVoice    = fs.String("default-voice", "", "voice ID for lines that have no speaker")
 		keyFile     = fs.String("key-file", "", "file holding the ElevenLabs API key")
@@ -170,6 +172,11 @@ func runGenerate(args []string) error {
 	fmt.Printf("Output:   %s  [layout %s, format %s, timestamps %v]\n\n",
 		*outDir, layout.Name(), *format, *timestamps)
 
+	if len(plan.Orphans) > 0 {
+		fmt.Printf("Orphans:  %d file(s) from removed lines%s\n",
+			len(plan.Orphans), map[bool]string{true: " — will be pruned", false: " (use -prune to delete)"}[*prune])
+	}
+
 	if *dryRun {
 		return dryRunPlan(plan, *verbose)
 	}
@@ -256,6 +263,31 @@ func runGenerate(args []string) error {
 		// Scripts chain on the exit code; a run with failures must not exit 0.
 		return fmt.Errorf("%s of %s files failed — re-run to retry just those", commas(res.Failed), commas(res.Targets))
 	}
+
+	// Post-run housekeeping — only after a fully successful run.
+	if *prune {
+		deleted, err := runner.PruneOrphans(lines)
+		if err != nil {
+			return err
+		}
+		if len(deleted) > 0 {
+			fmt.Printf("\nPruned %d orphaned file(s):\n", len(deleted))
+			for _, rel := range deleted {
+				fmt.Printf("  %s\n", rel)
+			}
+			fmt.Println("(delete these from the game project / Perforce too)")
+		}
+	}
+	if *deltaDir != "" {
+		if len(res.WrittenFiles) == 0 {
+			fmt.Printf("\nDelta: nothing was written this run — %s left untouched\n", *deltaDir)
+		} else {
+			if err := job.CopyFiles(*outDir, *deltaDir, res.WrittenFiles); err != nil {
+				return err
+			}
+			fmt.Printf("\nDelta: %s changed file(s) copied to %s\n", commas(len(res.WrittenFiles)), *deltaDir)
+		}
+	}
 	return nil
 }
 
@@ -339,6 +371,12 @@ func dryRunPlan(plan *job.PlanResult, verbose bool) error {
 				break
 			}
 			fmt.Printf("    %-34s %-4s [%s]  %.44q\n", it.RelPath, modelShort(it.Model), it.VoiceName, it.Text)
+		}
+	}
+	if len(plan.Orphans) > 0 {
+		fmt.Printf("\n  orphaned (lines no longer in the source; -prune deletes them):\n")
+		for _, rel := range plan.Orphans {
+			fmt.Printf("    %s\n", rel)
 		}
 	}
 	if plan.Failed > 0 {

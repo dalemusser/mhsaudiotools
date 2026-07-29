@@ -867,6 +867,7 @@ type Preview struct {
 	PerVoice     []VoiceCount `json:"perVoice"`
 	Samples      []SampleItem `json:"samples"`
 	Problems     []string     `json:"problems"`
+	Orphans      []string     `json:"orphans"` // files from lines removed from the source
 }
 
 // Preview builds a dry-run plan for the request.
@@ -928,7 +929,38 @@ func (a *App) Preview(req Request) (*Preview, error) {
 		PerVoice:     perVoice,
 		Samples:      samples,
 		Problems:     problems,
+		Orphans:      plan.Orphans,
 	}, nil
+}
+
+// PruneOrphans deletes files for lines no longer in the source — the engine
+// refuses when the plan has problems and only touches manifest-known files.
+// Needs no API key.
+func (a *App) PruneOrphans(req Request) ([]string, error) {
+	runner, lines, _, err := a.build(req)
+	if err != nil {
+		return nil, err
+	}
+	return runner.PruneOrphans(lines)
+}
+
+// ExportChangedFiles copies a finished run's written files into a folder the
+// user picks — the "changed files only" set to import into the game project,
+// so Perforce/Unity only sees what actually changed.
+func (a *App) ExportChangedFiles(outputDir string, relPaths []string) (string, error) {
+	if len(relPaths) == 0 {
+		return "", fmt.Errorf("that run wrote no files")
+	}
+	dst, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Choose a folder for the changed files",
+	})
+	if err != nil || dst == "" {
+		return "", err
+	}
+	if err := job.CopyFiles(outputDir, dst, relPaths); err != nil {
+		return "", err
+	}
+	return dst, nil
 }
 
 // RunSummary is the outcome of a finished run.
@@ -940,6 +972,10 @@ type RunSummary struct {
 	Problems     []string `json:"problems"`
 	ManifestPath string   `json:"manifestPath"`
 	Canceled     bool     `json:"canceled"`
+
+	// ChangedFiles are the output-relative paths this run wrote — what
+	// "Copy changed files…" exports for game-project import.
+	ChangedFiles []string `json:"changedFiles"`
 }
 
 // Generate runs the batch, emitting "progress" events as files complete. It
@@ -1051,6 +1087,7 @@ func (a *App) Generate(req Request) (*RunSummary, error) {
 		Failed:       res.Failed,
 		ManifestPath: res.ManifestPath,
 		Canceled:     canceled,
+		ChangedFiles: res.WrittenFiles,
 	}
 	for i, e := range res.Errors {
 		if i == 50 {

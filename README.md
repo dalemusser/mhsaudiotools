@@ -32,6 +32,9 @@ computer to the right download for both the app and the CLI.
 
 - **[docs/INSTALL.md](docs/INSTALL.md)** — installing on macOS, Windows, and Linux (app and CLI).
 - **[docs/USAGE.md](docs/USAGE.md)** — how to use the app and the CLI, with examples.
+- **[docs/updating-dialog-audio.md](docs/updating-dialog-audio.md)** — the
+  script changed: regenerate only what's different and update the Unity
+  project without re-importing everything.
 
 You'll need a free-or-paid **ElevenLabs API key** (the app asks for it on first
 run and saves it). See [Getting an API key](docs/INSTALL.md#getting-an-elevenlabs-api-key).

@@ -4,6 +4,12 @@
 # The engine/CLI job is the same gate release.yml runs. The app job go-vets and
 # go-builds the wails module on macOS (its cgo webview needs no extra packages
 # there); `wails build` itself stays release-only.
+#
+# Release pushes: putting "[release]" in the commit message skips this workflow
+# — the tag push runs release.yml moments later, whose verify job covers the
+# same ground, so a release day shows exactly one Actions run. (Deliberately
+# NOT GitHub's "[skip ci]", which would also suppress the tag-triggered
+# release workflow itself.)
 
 name: ci
 
@@ -17,6 +23,7 @@ permissions:
 
 jobs:
   engine-cli:
+    if: ${{ !contains(github.event.head_commit.message, '[release]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -27,6 +34,7 @@ jobs:
       - run: make verify
 
   app:
+    if: ${{ !contains(github.event.head_commit.message, '[release]') }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7

@@ -183,6 +183,8 @@ mhsaudio generate -in export.csv -voices voices.json -out ./audio -emotion
 | `-timestamps` | also write `<id>.words.json` word timings | off |
 | `-concurrency` | parallel requests (0 = account max) | `0` |
 | `-force` | regenerate everything | off |
+| `-prune` | after a clean run, delete files for removed lines | off |
+| `-delta` | copy this run's written files into a folder | — |
 | `-no-cleanup` | disable text cleanup | off (cleanup on) |
 | `-profile` | custom cleanup profile JSON | built-in `mhs-dialogue` |
 | `-model` | model for voices that don't set one: `v2`, `v3`, or a full ID | `v2` |
@@ -268,6 +270,29 @@ itself:
   adding `-rm-file` also deletes the plaintext dotfile.
 
 Windows/Linux keep using the dotfile (or the env var).
+
+### Updating the game project (Unity / Perforce)
+
+**Step-by-step walkthrough with both scenarios:
+[docs/updating-dialog-audio.md](updating-dialog-audio.md).** The short version:
+
+Keep **one** canonical output folder and always generate into it — the manifest
+makes re-runs incremental, so a new dialog export only synthesizes changed and
+added lines (no manual CSV diffing needed). Then move just the differences into
+the game project:
+
+- **Changed/added files** — after a run, the app's result card offers
+  **"Copy N changed file(s)…"**: it copies exactly what that run wrote (audio,
+  timing sidecars, and the Babylon manifest when produced) into a folder you
+  pick, preserving the folder layout. Drop that folder onto the Unity project
+  so only those files import. CLI: `-delta <folder>` does the same.
+- **Removed lines** — the Preview shows any **orphaned files** (audio for lines
+  no longer in the source) with a **"Remove orphaned files"** button; the CLI
+  lists them and `-prune` deletes them after a fully successful run. Pruning
+  only ever touches files this tool created (it works from the manifest) and
+  refuses to run if the plan has problems, so a broken voices file can't make
+  good audio look orphaned. Deleting those files from the game project /
+  Perforce remains a manual step — the pruned list tells you which ones.
 
 ### Job history
 
