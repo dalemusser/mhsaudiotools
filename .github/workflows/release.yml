@@ -29,10 +29,13 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          # The root module has zero deps, so there's no go.sum and nothing to
+          # cache — without this, setup-go warns "Restore cache failed".
+          cache: false
       - run: make verify
 
   # Pure Go — one runner emits all five CLI binaries.
@@ -40,14 +43,15 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # tags, so `git describe` gives a real version
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false # zero-dep module: no go.sum to key a cache on
       - run: make cli-all
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli
           path: dist/*
@@ -81,11 +85,11 @@ jobs:
       run:
         shell: bash # uniform scripting on all three OSes
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: wails/go.mod
           # Without this the cache keys off the root go.sum (which doesn't
@@ -132,7 +136,7 @@ jobs:
       # then `xcrun notarytool submit` the zip. Left as a TODO on purpose so
       # unsigned builds work today.
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           path: ${{ env.ASSET }}
@@ -143,7 +147,7 @@ jobs:
     needs: [cli, app]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Publish release
