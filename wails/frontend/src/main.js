@@ -231,6 +231,10 @@ $("key-change").onclick = () => {
   $("key-input").focus();
 };
 
+$("open-docs").onclick = () => {
+  app().OpenDocs(); // fire-and-forget; opens the system browser
+};
+
 // --- request ----------------------------------------------------------------
 
 function request() {

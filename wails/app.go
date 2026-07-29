@@ -1133,6 +1133,13 @@ func (a *App) Cancel() {
 	}
 }
 
+// OpenDocs opens the app's documentation (docs/USAGE.md on GitHub) in the
+// default browser. https URLs are fine through BrowserOpenURL — it is only the
+// file:// scheme it rejects (see RevealOutput).
+func (a *App) OpenDocs() {
+	runtime.BrowserOpenURL(a.ctx, "https://github.com/dalemusser/mhsaudiotools/blob/main/docs/USAGE.md")
+}
+
 // RevealOutput opens the output folder in the system file manager — the payoff
 // step, since the whole point is files on disk. This execs the platform opener
 // directly: Wails' BrowserOpenURL rejects the file:// scheme outright, so it
