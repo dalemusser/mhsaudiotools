@@ -7,6 +7,32 @@
 @source "./src/**/*.html";
 @source "./src/**/*.js";
 
+/* WebKitGTK (Linux) paints native (light) form controls and ignores CSS
+   backgrounds on <select> unless the native appearance is stripped — the
+   dropdowns came out white behind the dark theme's light text, unreadable.
+   Strip it everywhere and draw our own chevron so all three platforms match.
+   In the utilities layer so padding-right beats .input-sm's padding-inline
+   (layer order outranks specificity); colors/border stay with .input-sm so
+   the focus highlight keeps working. */
+@layer utilities {
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: var(--color-slate-800);
+    color: var(--color-slate-200);
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'><path d='M4 6l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0.4rem center;
+    background-size: 0.9rem;
+    padding-right: 1.6rem;
+  }
+  /* The popup list is native too; where WebKit honors these, keep it dark. */
+  select option {
+    background-color: var(--color-slate-800);
+    color: var(--color-slate-200);
+  }
+}
+
 @layer components {
   .card {
     @apply rounded-lg border border-slate-800 bg-slate-800/40 p-4;
