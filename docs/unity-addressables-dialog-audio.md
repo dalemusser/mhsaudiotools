@@ -72,6 +72,30 @@ is to shrink — and lookups become ambiguous about which copy they find.
 4. Add a **label** per unit (`unit1`, `unit2`, …) to the group's entries —
    labels are how you pre-download a whole unit in one call.
 
+### 4b. Choosing bundle contents mechanically (no curation needed)
+
+Finer-than-unit bundles only help if their contents match play patterns — and
+that partition is already encoded in the filenames: every entrytag starts with
+its **conversation ID** (`8_Toppo_2` = conversation 8). A conversation is
+exactly the "plays together" set, so *bundle-per-conversation* is derivable
+with a ~20-line editor script — no one decides what goes where:
+
+```csharp
+// AssetPostprocessor or batch editor script:
+string file = Path.GetFileNameWithoutExtension(assetPath); // "8_Toppo_2"
+string convId = file.Split('_')[0];                        // "8"
+entry.SetLabel("conv-" + convId, true, true);
+// Group Bundle Mode: "Pack Together By Label" -> one bundle per conversation.
+```
+
+First line of a conversation fetches its bundle; the rest of the conversation
+hits it; conversations never entered are never downloaded (unlike
+build-resident audio, which ships every unheard branch). If per-conversation
+is too fine (catalog bloat, request count), coarsen mechanically: bucket
+conversation-ID ranges, or derive area groupings from the export's
+Conversations section titles (`U2/Toppo` …) — still data-driven, still no
+human curation.
+
 ### 5. Group settings (per group, Inspector)
 
 - **Bundle Mode: Pack Together** — one bundle per unit (~15–40 MB each).

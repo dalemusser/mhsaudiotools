@@ -11,6 +11,9 @@ below.*
 
 - **~6,000 MP3 files** from ElevenLabs, one file per dialog line, a few
   seconds each (~6–7 hours of audio total).
+- The game currently ships as **5 separate builds, one per unit**, each
+  containing only its own unit's audio (roughly a fifth of the library,
+  ~30–50 MB compressed).
 - **Pixel Crushers Dialogue System**: the line's entry ID is the filename; the
   Dialogue System finds and plays the clip for the line being shown (e.g. the
   `AudioWait(entrytag)` sequencer command).
@@ -106,7 +109,7 @@ packaging (next section) matters as much as the per-clip settings.
 | Preload Audio Data | **Off** | The pairing that makes Decompress On Load safe: decode per use, not 6,000 at startup |
 | Quality | **50** to start | A/B test 35 / 50 / 65 on real lines; ship the lowest that passes on laptop/Chromebook speakers |
 | Sample Rate | Optimize | Free size win for speech |
-| Packaging | **Addressables (or AssetBundles), grouped by unit/chapter** — not one big Resources folder | ~150–250 MB of audio can't ride in the initial download; see the packaging section |
+| Packaging | **Addressables, grouped finer than the unit** (conversation/scene grain) — or keep build-resident if whole-unit-forever is the only option the team would use | With 5 per-unit builds, audio is ~30–50 MB per build; whole-unit bundles are memory-neutral, so the case rests on grain, startup, and rebuild-free updates — see "Honest sizing" |
 
 ## Packaging: the decision that matters most at 6,000 clips
 
@@ -139,6 +142,34 @@ So at this scale, split the dialog out of the main build:
 
 The per-clip import settings above are unchanged by any of this — they apply
 identically whether a clip lives in Resources or a bundle.
+
+### Where the bytes actually live (why this works)
+
+On WebGL the build's "virtual file system" is not a disk — **it's RAM**.
+Everything in the main `.data` file is downloaded and stays resident in
+browser memory for the whole session. Audio shipped in the build therefore
+costs its full compressed size (~150–250 MB here) in memory permanently,
+used or not, on top of the transient decoded buffer whenever a line plays.
+An Addressables bundle's compressed bytes also live in memory — but only
+**while the group is loaded**, and releasing the group genuinely returns the
+memory; re-entering a unit re-loads the bundle from the browser/IndexedDB
+cache without re-downloading. A playing clip briefly exists compressed +
+decoded under either approach; the win is scope and lifetime of the
+compressed copy, not the decode path.
+
+**Honest sizing for our 5-build structure:** the per-unit builds already scope
+the resident audio to one unit (~30–50 MB). A single whole-unit addressable
+loaded at unit start and held all session is therefore **memory-neutral** —
+bundle heap instead of VFS RAM, same magnitude. In our structure the real
+Addressables benefits are: **(1) finer grain** — group/label at
+conversation-or-scene level and residency drops to the current section's
+clips, which build-resident audio can never do; **(2) startup** — the unit is
+interactive without waiting on its audio payload, which downloads behind the
+scenes (or is PWA-pre-cached); **(3) audio updates without rebuilding the
+unit's build** — upload changed bundle + catalog, paired with the generator's
+changed-files export; **(4) the path to a single build** loading unit content
+on demand. If the team would only ever do whole-unit bundles held forever,
+benefits reduce to (2) and (3) — decide accordingly.
 
 *Implementation how-to:
 [unity-addressables-dialog-audio.md](unity-addressables-dialog-audio.md).*
