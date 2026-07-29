@@ -140,6 +140,40 @@ So at this scale, split the dialog out of the main build:
 The per-clip import settings above are unchanged by any of this — they apply
 identically whether a clip lives in Resources or a bundle.
 
+*Implementation how-to:
+[unity-addressables-dialog-audio.md](unity-addressables-dialog-audio.md).*
+
+### Addressables vs. raw AssetBundles
+
+**Runtime performance is a wash: Addressables *is* AssetBundles underneath.**
+It builds bundles, ships bundles, and loads bundles (via UnityWebRequest on
+Web); download size, decode cost, and memory are the same when configured
+equivalently. Addressables adds only a small content catalog fetched at
+startup and some ref-counting bookkeeping — noise next to the audio payload.
+The Dialogue System is neutral too: `AudioWait(entrytag)` resolves clips from
+Resources, registered AssetBundles, or Addressables (key = entrytag) alike.
+
+The difference is who does the management work:
+
+| Concern | Raw AssetBundles | Addressables |
+|---|---|---|
+| Assigning clips to bundles | By hand / your build script | Groups window; drag folders |
+| Building | Your `BuildPipeline` script | Built-in build (incremental) |
+| Knowing what's in which bundle | Your own bookkeeping | Content catalog, automatic |
+| Load/unload | Manual `Unload(true/false)` — classic footguns | Ref-counted `Release` |
+| Versioning & browser caching | Hand-rolled (hashes in names, Caching API) | Catalog + cache handled |
+| **Updating dialog without rebuilding the player** | Build your own update scheme | Built-in content-update workflow |
+| Cost | No package dep; total control | Extra package, learning curve, more abstraction when debugging |
+
+For MHS the update column is the one that matters: dialog changes keep coming,
+and the generator's changed-files export maps exactly onto "rebuild and
+re-upload only the groups containing changed clips" — with Addressables the
+updated catalog does the version juggling and clients pick up new audio
+without a new player build. **Recommend Addressables** unless the project
+already has a working AssetBundle pipeline the developer wants to keep — in
+which case staying is defensible, and performance won't be the deciding
+factor either way.
+
 ## To verify in a real Web build (not the Editor)
 
 1. **Initial download size** with and without the dialog audio in the main
